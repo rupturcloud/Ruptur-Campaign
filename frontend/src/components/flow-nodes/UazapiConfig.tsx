@@ -13,9 +13,19 @@ export function UazapiConfig({ value, onChange, showPreview = true }: { value: a
   const field = (key: string, label: string, numeric = false) => <label key={key} className="block text-sm text-gray-700">{label}<input className={style} type={numeric ? 'number' : 'text'} step="any" value={c[key] ?? ''} onChange={e => set(key, numeric ? (e.target.value === '' ? undefined : Number(e.target.value)) : e.target.value)} /></label>;
   const toggle = (key: string, label: string) => <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={!!c[key]} onChange={e => set(key, e.target.checked)} />{label}</label>;
   const media = ['image', 'video', 'videoplay', 'document', 'audio', 'myaudio', 'ptt', 'ptv', 'sticker'].includes(c.type);
+  const addBlock = (block: 'text' | 'image' | 'buttons') => {
+    if (block === 'text') return onChange({ ...c, text: c.text || '' });
+    // Uazapi /send/menu is the documented composition that carries text, imageButton and choices together.
+    if (block === 'image') return onChange({ ...c, type: 'button', text: c.text || '', buttons: c.buttons || [{ kind: 'reply', text: '', value: '' }], imageButton: c.imageButton || '' });
+    return onChange({ ...c, type: 'button', text: c.text || '', buttons: [...(c.buttons || []), { kind: 'reply', text: '', value: '' }] });
+  };
   return <div className={showPreview ? 'grid gap-5 xl:grid-cols-[minmax(0,1fr)_272px]' : 'space-y-4'}>
   <div className="space-y-4">
     <p className="text-sm text-gray-500">Use uma conexão Uazapi no início do fluxo. Cada mensagem será enviada ao contato da campanha. Variáveis: {'{{nome}}, {{telefone}}'}.</p>
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm text-emerald-900">Blocos desta mensagem</strong><details className="relative"><summary className="cursor-pointer rounded bg-emerald-700 px-3 py-2 text-sm font-medium text-white">Adicionar bloco</summary><div className="absolute right-0 z-20 mt-1 flex w-44 flex-col rounded border bg-white p-1 shadow-lg"><button type="button" className="rounded px-3 py-2 text-left text-sm hover:bg-emerald-50" onClick={() => addBlock('text')}>Texto</button><button type="button" className="rounded px-3 py-2 text-left text-sm hover:bg-emerald-50" onClick={() => addBlock('image')}>Imagem</button><button type="button" className="rounded px-3 py-2 text-left text-sm hover:bg-emerald-50" onClick={() => addBlock('buttons')}>Botões e links</button></div></details></div>
+      <p className="mt-2 text-xs text-emerald-800">{c.text !== undefined ? 'Texto' : 'Sem texto'} · {c.imageButton ? 'Imagem' : 'Sem imagem'} · {(c.buttons || []).length} botão(ões). Texto, imagem e botões são unidos na mesma composição Uazapi.</p>
+    </div>
     <label className="block text-sm">Tipo de mensagem<select className={style} value={c.type} onChange={e => onChange({ type: e.target.value, ...(e.target.value === 'button' ? { text: '', buttons: [{ kind: 'reply', text: '', value: '' }] } : ['list', 'poll'].includes(e.target.value) ? { text: '', choices: [''] } : {}), ...(e.target.value === 'carousel' ? { text: '', carousel: [{ text: '', buttons: [{ type: 'REPLY', text: '', id: '' }] }] } : {}) })}>{Object.entries(uazapiLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
     {!['contact', 'location', 'pix_button'].includes(c.type) && <label className="block text-sm">Texto / legenda<textarea className={style} rows={3} value={c.text || ''} onChange={e => set('text', e.target.value)} /></label>}
     {['button', 'list', 'poll'].includes(c.type) && <>

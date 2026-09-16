@@ -61,6 +61,22 @@ function compositionForPreview(item: { type: string; content: any } | undefined)
   return { type: 'text', text: item.content?.text || item.content?.caption || `Mensagem ${item.type}` };
 }
 
+function technicalPreview(item: { type: string; content: any }) {
+  const composition = item.type === 'uazapi' ? (item.content?.composition || item.content || {}) : item.content || {};
+  const kind = item.type === 'uazapi' ? composition.type : item.type;
+  const route = ['button', 'list', 'poll'].includes(kind) ? '/send/menu' : kind === 'carousel' ? '/send/carousel' : ['image', 'video', 'audio', 'document'].includes(kind) ? '/send/media' : '/send/text';
+  return { label: kind || 'texto', route, delay: composition.delay || 0 };
+}
+
+function numberedSequencePreview(sequence: Array<{ type: string; content: any }>) {
+  let messageNumber = 0;
+  return sequence.map((item, index) => ({
+    item,
+    index,
+    messageNumber: item.type === 'wait' ? undefined : ++messageNumber,
+  }));
+}
+
 export function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1102,8 +1118,7 @@ export function CampaignsPage() {
                             }}
                             className="px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 flex items-center gap-2"
                           >
-                            <span className="text-lg">+</span>
-                            + adicionar bloco
+                            Nova mensagem
                           </button>
                         </div>
 
@@ -2156,7 +2171,10 @@ export function CampaignsPage() {
 
                   <aside className="lg:col-span-2 xl:col-span-1">
                     <div className="mx-auto w-fit xl:sticky xl:top-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-                      <p className="mb-2 text-center text-xs font-medium text-emerald-900">Prévia da mensagem</p>
+                      <p className="mb-2 text-center text-xs font-medium text-emerald-900">Prévia da sequência</p>
+                      <div className="mb-3 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-emerald-100 bg-white p-2">
+                        {numberedSequencePreview('sequence' in formData.messageContent ? formData.messageContent.sequence : []).map(({ item, index, messageNumber }) => item.type === 'wait' ? <div key={index} className="rounded bg-amber-50 px-2 py-1 text-center text-[11px] text-amber-800">Intervalo antes da próxima mensagem · {item.content?.waitTime || 30}s</div> : <div key={index} className="rounded border border-slate-200 p-2 text-[11px]"><strong>Mensagem {messageNumber}</strong><p className="mt-1 line-clamp-2 text-slate-600">{compositionForPreview(item).text || 'Composição sem texto'}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{technicalPreview(item).route} · {technicalPreview(item).label} · presença {technicalPreview(item).delay}ms</p></div>)}
+                      </div>
                       <UazapiPhonePreview composition={compositionForPreview((('sequence' in formData.messageContent ? formData.messageContent.sequence : []).find(item => item.type !== 'wait')))} onReorderButtons={(from, to) => {
                         const sequence = ('sequence' in formData.messageContent ? formData.messageContent.sequence : []);
                         const itemIndex = sequence.findIndex(item => item.type === 'uazapi');
