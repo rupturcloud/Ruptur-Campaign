@@ -118,13 +118,13 @@ export function TenantSelector() {
       <div className="relative">
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center space-x-2 px-3 py-2 rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 transition-colors"
+          className="flex min-w-0 items-center space-x-1 px-2 py-2 rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 transition-colors sm:space-x-2 sm:px-3"
           disabled={loadingSuperAdmin}
         >
           <svg className="h-4 w-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 8v-3a1 1 0 011-1h2a1 1 0 011 1v3" />
           </svg>
-          <span className="text-sm text-blue-700 font-medium max-w-[150px] truncate">
+          <span className="text-sm text-blue-700 font-medium max-w-[92px] truncate sm:max-w-[150px]">
             {selectedTenant?.name || 'Selecionar empresa'}
           </span>
           <svg className={`h-4 w-4 text-blue-600 transform transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -182,14 +182,14 @@ export function TenantSelector() {
       {/* Tenant Selector Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center space-x-2 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+        className="flex min-w-0 items-center space-x-1 px-2 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors sm:space-x-2 sm:px-3"
         disabled={loading}
       >
         {/* Building icon */}
         <svg className="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 8v-3a1 1 0 011-1h2a1 1 0 011 1v3" />
         </svg>
-        <span className="text-sm text-gray-700 max-w-[150px] truncate">
+        <span className="text-sm text-gray-700 max-w-[92px] truncate sm:max-w-[150px]">
           {currentTenant?.name || 'Selecionar empresa'}
         </span>
         {/* Chevron down icon */}

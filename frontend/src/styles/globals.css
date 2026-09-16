@@ -133,3 +133,19 @@ body {
 .main-content {
   margin-left: 80px; /* Largura da sidebar */
 }
+
+@media (max-width: 640px) {
+  .sidebar-navigation {
+    width: 64px !important;
+  }
+
+  .sidebar-navigation > div {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .main-content {
+    margin-left: 64px;
+    min-width: 0;
+  }
+}
