@@ -62,7 +62,7 @@ services:
         parallelism: 1
         failure_action: rollback
   backend:
-    image: ruptur-campaign-backend:b51cdb3-uazapi-contract-1
+    image: ruptur-campaign-backend:uazapi-composer-20260916-4
     environment:
       REDIS_URL: redis://redis:6379
       REDIS_PREFIX: ruptur_campaign
@@ -117,7 +117,7 @@ services:
       start_period: 120s
       retries: 3
   frontend:
-    image: ruptur-campaign-frontend:b51cdb3-manual-leads-1
+    image: ruptur-campaign-frontend:uazapi-composer-20260916-5
     networks:
     - private
     - network_public

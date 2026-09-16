@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
 interface Settings {
+  logoUrl?: string;
   faviconUrl?: string;
   pageTitle?: string;
   iconUrl?: string;
@@ -24,6 +25,7 @@ export function useGlobalSettings() {
       if (response.ok) {
         const data = await response.json();
         setSettings({
+          logoUrl: data.logoUrl,
           faviconUrl: data.faviconUrl,
           pageTitle: data.pageTitle,
           iconUrl: data.iconUrl,

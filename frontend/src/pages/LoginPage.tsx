@@ -41,17 +41,16 @@ export function LoginPage() {
           <div className="lg:w-1/2 p-12 flex items-center justify-center text-white" style={{ background: 'linear-gradient(135deg, #233e4f 0%, #1a2d3b 100%)' }}>
             <div className="text-center">
               <div className="w-24 h-24 bg-white/20 rounded-2xl mx-auto mb-8 flex items-center justify-center backdrop-blur-sm">
-                {settings?.iconUrl ? (
+                {settings?.logoUrl || settings?.iconUrl ? (
                   <img
-                    src={settings.iconUrl}
-                    alt="Ícone do Sistema"
-                    className="w-16 h-16 object-contain"
-                    style={{ filter: 'brightness(0) invert(1)' }}
+                    src={settings.logoUrl || settings.iconUrl}
+                    alt={settings?.pageTitle || 'Ruptur'}
+                    className="max-w-20 max-h-16 object-contain"
                   />
                 ) : (
                   <img
                     src="/favicon.png"
-                    alt="Astra Online"
+                    alt="Ruptur"
                     className="w-16 h-16 object-contain"
                     style={{ filter: 'brightness(0) invert(1)' }}
                   />

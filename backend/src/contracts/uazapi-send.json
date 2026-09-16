@@ -1,0 +1,618 @@
+{
+  "/send/text": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "linkPreview": {
+        "type": "boolean"
+      },
+      "linkPreviewTitle": {
+        "type": "string"
+      },
+      "linkPreviewDescription": {
+        "type": "string"
+      },
+      "linkPreviewImage": {
+        "type": "string"
+      },
+      "linkPreviewLarge": {
+        "type": "boolean"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "forward": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "number",
+      "text"
+    ]
+  },
+  "/send/media": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "type": {
+        "type": "string",
+        "enum": [
+          "image",
+          "video",
+          "videoplay",
+          "document",
+          "audio",
+          "myaudio",
+          "ptt",
+          "ptv",
+          "sticker"
+        ]
+      },
+      "file": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "docName": {
+        "type": "string"
+      },
+      "thumbnail": {
+        "type": "string"
+      },
+      "mimetype": {
+        "type": "string"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "forward": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      },
+      "viewOnce": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "number",
+      "type",
+      "file"
+    ]
+  },
+  "/send/contact": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "fullName": {
+        "type": "string"
+      },
+      "phoneNumber": {
+        "type": "string"
+      },
+      "organization": {
+        "type": "string"
+      },
+      "email": {
+        "type": "string"
+      },
+      "url": {
+        "type": "string"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "forward": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "number",
+      "fullName",
+      "phoneNumber"
+    ]
+  },
+  "/send/location": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "address": {
+        "type": "string"
+      },
+      "latitude": {
+        "type": "number"
+      },
+      "longitude": {
+        "type": "number"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "forward": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "number",
+      "latitude",
+      "longitude"
+    ]
+  },
+  "/send/status": {
+    "type": "object",
+    "properties": {
+      "type": {
+        "type": "string",
+        "enum": [
+          "text",
+          "image",
+          "video",
+          "audio",
+          "myaudio",
+          "ptt"
+        ]
+      },
+      "text": {
+        "type": "string"
+      },
+      "background_color": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 19
+      },
+      "font": {
+        "type": "integer",
+        "enum": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10
+        ]
+      },
+      "file": {
+        "type": "string"
+      },
+      "thumbnail": {
+        "type": "string"
+      },
+      "mimetype": {
+        "type": "string"
+      },
+      "recipients": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "max_recipients": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "required": [
+      "type"
+    ]
+  },
+  "/send/menu": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "type": {
+        "type": "string",
+        "enum": [
+          "button",
+          "list",
+          "poll",
+          "carousel"
+        ]
+      },
+      "text": {
+        "type": "string"
+      },
+      "footerText": {
+        "type": "string"
+      },
+      "listButton": {
+        "type": "string"
+      },
+      "selectableCount": {
+        "type": "integer"
+      },
+      "choices": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "imageButton": {
+        "type": "string"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "number",
+      "type",
+      "text",
+      "choices"
+    ]
+  },
+  "/send/carousel": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "carousel": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "video": {
+              "type": "string"
+            },
+            "document": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "buttons": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "REPLY",
+                      "URL",
+                      "CALL",
+                      "COPY"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "text",
+            "buttons"
+          ]
+        }
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "forward": {
+        "type": "boolean"
+      },
+      "async": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "number",
+      "text",
+      "carousel"
+    ]
+  },
+  "/send/location-button": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "number",
+      "text"
+    ]
+  },
+  "/send/request-payment": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "footer": {
+        "type": "string"
+      },
+      "itemName": {
+        "type": "string"
+      },
+      "invoiceNumber": {
+        "type": "string"
+      },
+      "amount": {
+        "type": "number"
+      },
+      "pixKey": {
+        "type": "string"
+      },
+      "pixType": {
+        "type": "string"
+      },
+      "pixName": {
+        "type": "string"
+      },
+      "paymentLink": {
+        "type": "string"
+      },
+      "fileUrl": {
+        "type": "string"
+      },
+      "fileName": {
+        "type": "string"
+      },
+      "boletoCode": {
+        "type": "string"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "async": {
+        "type": "boolean"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "number",
+      "amount"
+    ]
+  },
+  "/send/pix-button": {
+    "type": "object",
+    "properties": {
+      "number": {
+        "type": "string"
+      },
+      "pixType": {
+        "type": "string"
+      },
+      "pixKey": {
+        "type": "string"
+      },
+      "pixName": {
+        "type": "string"
+      },
+      "async": {
+        "type": "boolean"
+      },
+      "delay": {
+        "type": "integer"
+      },
+      "readchat": {
+        "type": "boolean"
+      },
+      "readmessages": {
+        "type": "boolean"
+      },
+      "replyid": {
+        "type": "string"
+      },
+      "mentions": {
+        "type": "string"
+      },
+      "track_source": {
+        "type": "string"
+      },
+      "track_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "number",
+      "pixType",
+      "pixKey"
+    ]
+  }
+}

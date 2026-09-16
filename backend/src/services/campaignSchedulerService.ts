@@ -612,6 +612,10 @@ class CampaignSchedulerService {
       let result: any;
 
       switch (messageType) {
+        case 'uazapi':
+          result = await uazapiService.sendComposition(instanceName, phone,
+            this.processVariables(content.composition || content, contactData || {}), tenantId);
+          break;
         case 'text':
           result = await sendForTenant(instanceName, phone, { text: content.text });
           break;

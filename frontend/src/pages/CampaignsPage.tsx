@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { Header } from '../components/Header';
 import { Portal } from '../components/Portal';
+import { UazapiConfig } from '../components/flow-nodes/UazapiConfig';
+import { UazapiPhonePreview } from '../components/flow-nodes/UazapiPhonePreview';
 
 type MessageContent =
   | { text: string }
@@ -52,10 +54,18 @@ interface ContactTag {
   nome: string;
 }
 
+function compositionForPreview(item: { type: string; content: any } | undefined) {
+  if (!item || item.type === 'wait') return { type: 'text', text: 'Adicione uma mensagem para ver a prévia.' };
+  if (item.type === 'uazapi') return item.content?.composition || item.content || { type: 'text', text: '' };
+  if (['image', 'video', 'audio', 'document'].includes(item.type)) return { type: item.type, file: item.content?.url || '', text: item.content?.caption || '' };
+  return { type: 'text', text: item.content?.text || item.content?.caption || `Mensagem ${item.type}` };
+}
+
 export function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportData, setReportData] = useState<any>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -78,7 +88,7 @@ export function CampaignsPage() {
     sessionNames: [] as string[],
     sessionName: '',
     messageType: 'sequence',
-    messageContent: { sequence: [] as Array<{ type: string; content: any }> } as MessageContent,
+    messageContent: { sequence: [{ type: 'uazapi', content: { composition: { type: 'text', text: '' } } }] as Array<{ type: string; content: any }> } as MessageContent,
     randomDelay: 30,
     startImmediately: true,
     scheduledFor: ''
@@ -240,8 +250,8 @@ export function CampaignsPage() {
         scheduledFor: scheduledForISO
       };
 
-      const response = await authenticatedFetch('/api/campaigns', {
-        method: 'POST',
+      const response = await authenticatedFetch(editingCampaignId ? `/api/campaigns/${editingCampaignId}` : '/api/campaigns', {
+        method: editingCampaignId ? 'PUT' : 'POST',
         body: JSON.stringify(campaignData)
       });
 
@@ -257,8 +267,9 @@ export function CampaignsPage() {
         }
       }
 
-      toast.success('Campanha criada com sucesso!');
+      toast.success(editingCampaignId ? 'Campanha atualizada com sucesso!' : 'Campanha criada com sucesso!');
       setShowCreateModal(false);
+      setEditingCampaignId(null);
       resetForm();
       loadCampaigns();
     } catch (error) {
@@ -275,7 +286,7 @@ export function CampaignsPage() {
       sessionNames: [],
       sessionName: '',
       messageType: 'sequence',
-      messageContent: { sequence: [] },
+      messageContent: { sequence: [{ type: 'uazapi', content: { composition: { type: 'text', text: '' } } }] },
       randomDelay: 30,
       startImmediately: true,
       scheduledFor: ''
@@ -283,6 +294,14 @@ export function CampaignsPage() {
     setUploadingFiles({});
     setFileInfos({});
     setDraggedIndex(null);
+  };
+
+  const handleEditCampaign = (campaign: Campaign) => {
+    const content: any = campaign.messageContent;
+    const sequence = campaign.messageType === 'sequence' ? (content.sequence || []) : [{ type: campaign.messageType, content }];
+    setFormData({ nome: campaign.nome, targetTags: campaign.targetTags || [], manualPhones: '', sessionNames: campaign.sessionNames || [], sessionName: campaign.sessionName || '', messageType: 'sequence', messageContent: { sequence }, randomDelay: campaign.randomDelay, startImmediately: campaign.startImmediately, scheduledFor: campaign.scheduledFor ? campaign.scheduledFor.slice(0, 16) : '' });
+    setEditingCampaignId(campaign.id);
+    setShowCreateModal(true);
   };
 
   const handleDragStart = (index: number) => {
@@ -700,7 +719,7 @@ export function CampaignsPage() {
         subtitle={`${campaigns.length} campanhas ativas`}
         actions={
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => { setEditingCampaignId(null); resetForm(); setShowCreateModal(true); }}
             className="btn-primary"
           >
             + Nova Campanha
@@ -771,6 +790,9 @@ export function CampaignsPage() {
                           <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
                         </svg>
                       </button>
+                      {campaign.status !== 'RUNNING' && (
+                        <button onClick={() => handleEditCampaign(campaign)} className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700" title="Editar campanha">✎</button>
+                      )}
                       {campaign.status === 'RUNNING' && (
                         <button
                           onClick={() => handleToggleCampaign(campaign.id, 'pause')}
@@ -817,14 +839,14 @@ export function CampaignsPage() {
         {showCreateModal && (
           <Portal>
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ zIndex: 9999 }}>
-            <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[95vh] overflow-y-auto">
+            <div className="bg-white rounded-lg shadow-xl max-w-[1600px] w-full max-h-[95vh] overflow-y-auto">
               <div className="flex justify-between items-center p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900">Nova Campanha</h3>
+                  <h3 className="text-xl font-semibold text-gray-900">{editingCampaignId ? 'Editar Campanha' : 'Nova Campanha'}</h3>
                   <p className="text-sm text-gray-600 mt-1">Configure sua campanha de mensagens WhatsApp</p>
                 </div>
                 <button
-                  onClick={() => setShowCreateModal(false)}
+                  onClick={() => { setShowCreateModal(false); setEditingCampaignId(null); resetForm(); }}
                   className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-colors"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -834,7 +856,7 @@ export function CampaignsPage() {
               </div>
 
               <form onSubmit={handleCreateCampaign} className="p-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[minmax(280px,.8fr)_minmax(420px,1.2fr)_296px] gap-8">
 
                   {/* COLUNA ESQUERDA - Informações Básicas */}
                   <div className="space-y-6">
@@ -1040,7 +1062,7 @@ export function CampaignsPage() {
                   <div className="space-y-6">
                     <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
                       <h4 className="text-lg font-semibold text-purple-900 mb-2">💬 Mensagens da Campanha</h4>
-                      <p className="text-sm text-purple-700">Configure o conteúdo que será enviado aos contatos</p>
+                      <p className="text-sm text-purple-700">Composição Uazapi é o padrão. A prévia permanece visível durante toda a edição.</p>
                     </div>
 
                     <div>
@@ -1072,7 +1094,7 @@ export function CampaignsPage() {
                             type="button"
                             onClick={() => {
                               const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
-                              const newSequence = [...currentSequence, { type: 'text', content: { text: '' } }];
+                              const newSequence = [...currentSequence, { type: 'uazapi', content: { composition: { type: 'text', text: '' } } }];
                               setFormData(prev => ({
                                 ...prev,
                                 messageContent: { sequence: newSequence }
@@ -1081,7 +1103,7 @@ export function CampaignsPage() {
                             className="px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 flex items-center gap-2"
                           >
                             <span className="text-lg">+</span>
-                            Mensagem
+                            Adicionar composição Uazapi
                           </button>
                         </div>
 
@@ -1130,6 +1152,9 @@ export function CampaignsPage() {
                                     const newType = e.target.value;
                                     let newContent;
                                     switch (newType) {
+                                      case 'uazapi':
+                                        newContent = { composition: { type: 'text', text: '' } };
+                                        break;
                                       case 'text':
                                         newContent = { text: '' };
                                         break;
@@ -1161,15 +1186,28 @@ export function CampaignsPage() {
                                   }}
                                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
-                                  <option value="text">💬 Texto</option>
+                                  <option value="uazapi">🧩 Uazapi — composição completa (padrão)</option>
+                                  <option value="text">💬 Texto legado</option>
                                   <option value="image">🖼️ Imagem</option>
                                   <option value="video">🎬 Vídeo</option>
                                   <option value="audio">🎵 Áudio</option>
                                   <option value="document">📄 Arquivo</option>
+                                  <option value="uazapi">🧩 Uazapi — composição completa</option>
                                   <option value="openai">🤖 OpenAI</option>
                                   <option value="groq">⚡ Groq AI</option>
                                   <option value="wait">⏱️ Espera</option>
                                 </select>
+
+                                {item.type === 'uazapi' && (
+                                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+                                    <div className="mb-3"><strong className="text-sm text-emerald-900">Composição Uazapi experimental</strong><p className="text-xs text-emerald-800">Os campos abaixo são enviados como payload estruturado pela rota documentada da Uazapi. Use somente em conexões Uazapi.</p></div>
+                                    <UazapiConfig value={item.content.composition || item.content} showPreview={false} onChange={(composition) => {
+                                      const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                      const newSequence = currentSequence.map((seqItem, i) => i === index ? { ...seqItem, content: { ...seqItem.content, composition } } : seqItem);
+                                      setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                    }} />
+                                  </div>
+                                )}
 
                                 {item.type === 'text' && (
                                   <div className="space-y-2">
@@ -2115,12 +2153,27 @@ export function CampaignsPage() {
                       </div>
                     </div>
                   </div>
+
+                  <aside className="lg:col-span-2 xl:col-span-1">
+                    <div className="mx-auto w-fit xl:sticky xl:top-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
+                      <p className="mb-2 text-center text-xs font-medium text-emerald-900">Prévia da mensagem</p>
+                      <UazapiPhonePreview composition={compositionForPreview((('sequence' in formData.messageContent ? formData.messageContent.sequence : []).find(item => item.type !== 'wait')))} onReorderButtons={(from, to) => {
+                        const sequence = ('sequence' in formData.messageContent ? formData.messageContent.sequence : []);
+                        const itemIndex = sequence.findIndex(item => item.type === 'uazapi');
+                        if (itemIndex < 0) return;
+                        const composition = sequence[itemIndex].content.composition || sequence[itemIndex].content;
+                        const buttons = [...(composition.buttons || [])]; const [button] = buttons.splice(from, 1); buttons.splice(to, 0, button);
+                        const updated = sequence.map((item, index) => index === itemIndex ? { ...item, content: { ...item.content, composition: { ...composition, buttons } } } : item);
+                        setFormData(prev => ({ ...prev, messageContent: { sequence: updated } }));
+                      }} />
+                    </div>
+                  </aside>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-8 border-t border-gray-200">
                   <button
                     type="button"
-                    onClick={() => setShowCreateModal(false)}
+                    onClick={() => { setShowCreateModal(false); setEditingCampaignId(null); resetForm(); }}
                     className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
                   >
                     Cancelar
@@ -2129,7 +2182,7 @@ export function CampaignsPage() {
                     type="submit"
                     className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all font-medium shadow-lg"
                   >
-                    Criar Campanha
+                    {editingCampaignId ? 'Salvar alterações' : 'Criar Campanha'}
                   </button>
                 </div>
               </form>

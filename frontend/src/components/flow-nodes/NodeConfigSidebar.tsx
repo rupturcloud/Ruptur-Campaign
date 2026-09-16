@@ -1,3 +1,4 @@
+import { UazapiConfig } from './UazapiConfig';
 import { useState, useEffect, useRef } from 'react';
 import { Node, Edge } from 'reactflow';
 import { Connection } from '../../services/interactiveCampaignApi';
@@ -79,7 +80,7 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
   if (!node) return null;
 
   const handleSave = () => {
-    onSave(node.id, config);
+    onSave(node.id, node.data.nodeType === 'uazapi' ? { ...config, composition: config.composition || config.payload || { type: 'button', text: '', choices: [''] } } : config);
     onClose();
   };
 
@@ -2511,6 +2512,7 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
       delay: 'Delay',
       httprest: 'HTTP REST',
       stop: 'Stop',
+      uazapi: 'Mensagem Uazapi',
       integration_perfex: 'Perfex CRM',
       integration_chatwoot: 'Chatwoot',
     };
@@ -2519,6 +2521,8 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
 
   const renderConfig = () => {
     switch (node.data.nodeType) {
+      case 'uazapi':
+        return <UazapiConfig value={config.composition || config.payload} onChange={composition => setConfig({ ...config, composition })} />;
       case 'trigger':
         return renderTriggerConfig();
       case 'text':

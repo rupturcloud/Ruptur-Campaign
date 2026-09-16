@@ -1,3 +1,4 @@
+import { buildUazapiComposition } from './uazapiComposition';
 import crypto from 'crypto';
 
 export function normalizeUazapiHost(value: string): string {
@@ -32,7 +33,11 @@ export class UazapiClient {
     if (!token || /[\r\n]/.test(token)) throw new Error('Informe o token da instância Uazapi');
   }
   async request(endpoint: string, method = 'GET', payload?: unknown): Promise<any> {
-    const allowed = ['GET /instance/status', 'POST /instance/connect', 'POST /instance/disconnect', 'POST /send/text', 'POST /send/media', 'POST /chat/check', 'GET /webhook', 'POST /webhook'];
+    const allowed = ['GET /instance/status', 'POST /instance/connect', 'POST /instance/disconnect',
+      'POST /send/text', 'POST /send/media', 'POST /send/menu', 'POST /send/carousel',
+      'POST /send/location-button', 'POST /send/contact', 'POST /send/location',
+      'POST /send/request-payment', 'POST /send/pix-button', 'POST /send/status',
+      'POST /chat/check', 'GET /webhook', 'POST /webhook'];
     if (!allowed.includes(`${method} ${endpoint}`)) throw new Error('Operação Uazapi não suportada');
     let response: globalThis.Response;
     try {
@@ -67,8 +72,8 @@ export class UazapiClient {
     // Campaign internals use { image: { url }, caption }, while callers that
     // already speak Uazapi use { type, file, text }. Normalize both forms to
     // the exact /send/media contract from the Uazapi specification.
-    const type = ['image', 'video', 'audio', 'document', 'myaudio', 'ptt', 'ptv', 'sticker'].find(t => message[t]) ||
-      (['image', 'video', 'audio', 'document', 'myaudio', 'ptt', 'ptv', 'sticker'].includes(message.type) ? message.type : null);
+    const type = ['image', 'video', 'videoplay', 'audio', 'document', 'myaudio', 'ptt', 'ptv', 'sticker'].find(t => message[t]) ||
+      (['image', 'video', 'videoplay', 'audio', 'document', 'myaudio', 'ptt', 'ptv', 'sticker'].includes(message.type) ? message.type : null);
     if (type) {
       const media = message[type];
       const file = typeof media === 'string' ? media : media?.url || media?.file || message.file;
@@ -88,6 +93,15 @@ export class UazapiClient {
     const id = data.messageid || data.id || data.message?.id || data.key?.id;
     if (!id || data.response?.status === 'error') throw new Error('Uazapi não confirmou o envio com um identificador de mensagem');
     return { id: String(id) };
+  }
+  async sendComposition(phone: string, composition: any) {
+    const number = normalizeUazapiNumber(phone);
+    if (!composition || typeof composition !== 'object') throw new Error('Composição Uazapi inválida');
+    const { endpoint, payload } = buildUazapiComposition(number, composition);
+    const data = await this.request(endpoint, 'POST', payload);
+    const id = data.messageid || data.id || data.message?.id || data.key?.id;
+    if (!id || data.response?.status === 'error') throw new Error('Uazapi não confirmou a composição enviada com um identificador');
+    return { id: String(id), raw: data };
   }
 }
 export function normalizeUazapiNumber(phone: string): string {

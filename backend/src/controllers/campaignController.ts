@@ -26,7 +26,7 @@ export const campaignValidation = [
   body('nome').notEmpty().withMessage('Nome da campanha é obrigatório'),
   body('targetTags').isArray().withMessage('Categorias dos contatos devem ser um array'),
   body('sessionNames').isArray({ min: 1 }).withMessage('Pelo menos uma sessão WhatsApp deve ser selecionada'),
-  body('messageType').isIn(['text', 'image', 'video', 'audio', 'document', 'sequence', 'openai', 'groq', 'wait']).withMessage('Tipo de mensagem inválido'),
+  body('messageType').isIn(['text', 'image', 'video', 'audio', 'document', 'uazapi', 'sequence', 'openai', 'groq', 'wait']).withMessage('Tipo de mensagem inválido'),
   body('messageContent').notEmpty().withMessage('Conteúdo da mensagem é obrigatório'),
   body('randomDelay').isInt({ min: 0 }).withMessage('Delay deve ser um número positivo'),
   body('startImmediately').isBoolean().withMessage('StartImmediately deve ser boolean'),
@@ -314,27 +314,25 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
 export const updateCampaign = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
-
-    // Se há targetTags, converter para JSON
-    if (updateData.targetTags) {
-      updateData.targetTags = JSON.stringify(updateData.targetTags);
+    const { nome, targetTags, sessionNames, messageType, messageContent, randomDelay, startImmediately, scheduledFor } = req.body;
+    const where: any = { id };
+    if (req.user?.role !== 'SUPERADMIN') where.tenantId = req.tenantId;
+    const existing = await prisma.campaign.findFirst({ where });
+    if (!existing) return res.status(404).json({ error: 'Campanha não encontrada' });
+    // Only model fields are allowed through. Form-only inputs such as manualPhones
+    // are used at creation time to create contacts and must never reach Prisma update.
+    const updateData: any = {};
+    if (nome !== undefined) updateData.nome = nome;
+    if (targetTags !== undefined) updateData.targetTags = JSON.stringify(targetTags);
+    if (sessionNames !== undefined) {
+      updateData.sessionNames = JSON.stringify(sessionNames);
+      updateData.sessionName = sessionNames[0] || existing.sessionName;
     }
-
-    // Se há sessionNames, converter para JSON
-    if (updateData.sessionNames) {
-      updateData.sessionNames = JSON.stringify(updateData.sessionNames);
-    }
-
-    // Se há messageContent, converter para JSON
-    if (updateData.messageContent) {
-      updateData.messageContent = JSON.stringify(updateData.messageContent);
-    }
-
-    // Se há scheduledFor, converter para Date
-    if (updateData.scheduledFor) {
-      updateData.scheduledFor = new Date(updateData.scheduledFor);
-    }
+    if (messageType !== undefined) updateData.messageType = messageType;
+    if (messageContent !== undefined) updateData.messageContent = JSON.stringify(messageContent);
+    if (randomDelay !== undefined) updateData.randomDelay = randomDelay;
+    if (startImmediately !== undefined) updateData.startImmediately = startImmediately;
+    if (scheduledFor !== undefined) updateData.scheduledFor = scheduledFor ? new Date(scheduledFor) : null;
 
     const campaign = await prisma.campaign.update({
       where: { id },

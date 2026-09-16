@@ -60,6 +60,10 @@ export const uazapiService = {
     const result = await this.client(session).send(phone, message);
     return result;
   },
+  async sendComposition(name: string, phone: string, composition: any, tenantId?: string) {
+    const session = await this.session(name, tenantId);
+    return this.client(session).sendComposition(phone, composition);
+  },
   async checkContact(name: string, phone: string, tenantId?: string) {
     return this.client(await this.session(name, tenantId)).checkContact(phone);
   }

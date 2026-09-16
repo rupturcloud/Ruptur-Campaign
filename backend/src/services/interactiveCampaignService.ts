@@ -339,7 +339,7 @@ export const interactiveCampaignService = {
     // Extrair nós do graph (apenas nós de envio de mensagem)
     const graph = campaign.graph as any;
     const flowNodes = (graph.nodes || [])
-      .filter((n: any) => ['text', 'image', 'video', 'audio', 'document', 'action'].includes(n.data?.nodeType))
+      .filter((n: any) => ['text', 'image', 'video', 'audio', 'document', 'action', 'uazapi'].includes(n.data?.nodeType))
       .map((n: any) => ({
         id: n.id,
         type: n.data?.nodeType || 'unknown',

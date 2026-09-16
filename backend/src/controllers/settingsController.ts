@@ -149,6 +149,7 @@ export const getPublicSettings = async (req: Request, res: Response) => {
   try {
     const settings = await settingsService.getSettings();
     res.json({
+      logoUrl: settings.logoUrl,
       faviconUrl: settings.faviconUrl,
       pageTitle: settings.pageTitle,
       iconUrl: settings.iconUrl,

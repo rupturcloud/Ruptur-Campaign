@@ -1,3 +1,4 @@
+import { replaceCompositionVariables } from './uazapiComposition';
 import { uazapiService } from './uazapiService';
 /**
  * Interactive Campaign Flow Engine
@@ -77,7 +78,7 @@ export const interactiveCampaignFlowEngine = {
       }
 
       // Se o próximo nó é um tipo que envia mensagem, enviar
-      const messageNodeTypes = ['action', 'text', 'image', 'video', 'audio', 'document'];
+      const messageNodeTypes = ['action', 'text', 'image', 'video', 'audio', 'document', 'uazapi'];
       if (messageNodeTypes.includes(nextNode.data?.nodeType)) {
         await this.sendNodeMessage(nextNode, session, data.contactPhone);
       }
@@ -415,9 +416,15 @@ export const interactiveCampaignFlowEngine = {
     const variables = (session.variables as Record<string, any>) || {};
 
     // Preparar payload baseado no tipo de nó
+    if (nodeType === 'uazapi' && connection.provider !== 'UAZAPI') throw new Error('Este nó requer uma conexão Uazapi');
     let messagePayload: any = null;
 
     switch (nodeType) {
+      case 'uazapi':
+        messagePayload = config.composition || config.payload;
+        if (!messagePayload) throw new Error('Composição Uazapi não configurada');
+        messagePayload = this.replaceVariablesInObject(messagePayload, variables);
+        break;
       case 'text':
       case 'action':
         const textContent = config.content || config.message || '';
@@ -480,7 +487,8 @@ export const interactiveCampaignFlowEngine = {
     try {
       switch (connection.provider) {
         case 'UAZAPI':
-          await uazapiService.send(connection.instanceName, contactPhone, messagePayload, session.tenantId || undefined);
+          if (nodeType === 'uazapi') await uazapiService.sendComposition(connection.instanceName, contactPhone, messagePayload, session.tenantId || undefined);
+          else await uazapiService.send(connection.instanceName, contactPhone, messagePayload, session.tenantId || undefined);
           break;
 
         case 'WAHA':
@@ -551,6 +559,10 @@ export const interactiveCampaignFlowEngine = {
     });
 
     return result;
+  },
+
+  replaceVariablesInObject(value: any, variables: Record<string, any>): any {
+    return replaceCompositionVariables(value, variables);
   },
 
   /**
@@ -626,7 +638,7 @@ export const interactiveCampaignFlowEngine = {
       }
 
       // Se é um nó de mensagem, enviar
-      const messageNodeTypes = ['action', 'text', 'image', 'video', 'audio', 'document'];
+      const messageNodeTypes = ['action', 'text', 'image', 'video', 'audio', 'document', 'uazapi'];
       if (messageNodeTypes.includes(nextNode.data?.nodeType)) {
         await this.sendNodeMessage(nextNode, session, contactPhone);
 
@@ -665,7 +677,7 @@ export const interactiveCampaignFlowEngine = {
       }
 
       // Se próximo nó é mensagem, enviar (continuar sequência)
-      const messageNodeTypes = ['action', 'text', 'image', 'video', 'audio', 'document'];
+      const messageNodeTypes = ['action', 'text', 'image', 'video', 'audio', 'document', 'uazapi'];
       if (messageNodeTypes.includes(nextNode.data?.nodeType)) {
         await interactiveCampaignSessionService.updateSession(session.id, {
           currentNodeId: nextNode.id,

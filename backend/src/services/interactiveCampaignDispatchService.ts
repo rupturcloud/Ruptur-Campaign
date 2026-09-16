@@ -1,3 +1,4 @@
+import { replaceCompositionVariables } from './uazapiComposition';
 import { uazapiService } from './uazapiService';
 /**
  * Interactive Campaign Dispatch Service
@@ -86,9 +87,15 @@ export const interactiveCampaignDispatchService = {
       let mediaUrl: string | null = null;
       let mediaType: string | null = null;
       let fileName: string | null = null;
+      let advancedComposition: any = null;
 
       // Suportar novos tipos de nós e backward compatibility com 'action'
       switch (nodeType) {
+        case 'uazapi':
+          advancedComposition = nodeConfig.composition || nodeConfig.payload;
+          if (!advancedComposition) return;
+          messageTemplate = '[uazapi]';
+          break;
         case 'text':
           messageTemplate = nodeConfig.content;
           break;
@@ -295,7 +302,9 @@ export const interactiveCampaignDispatchService = {
           // Preparar payload da mensagem
           let messagePayload: any;
 
-          if (mediaUrl) {
+          if (advancedComposition) {
+            messagePayload = replaceCompositionVariables(advancedComposition, contact);
+          } else if (mediaUrl) {
             // Mensagem com mídia
             messagePayload = {
               media: {
@@ -309,9 +318,11 @@ export const interactiveCampaignDispatchService = {
           }
 
           // Enviar baseado no provider usando número validado
+          if (nodeType === 'uazapi' && connection.provider !== 'UAZAPI') throw new Error('Este nó requer uma conexão Uazapi');
           switch (connection.provider) {
             case 'UAZAPI':
-              await uazapiService.send(connection.instanceName, validatedPhone,
+              if (advancedComposition) await uazapiService.sendComposition(connection.instanceName, validatedPhone, messagePayload, campaign.tenantId || undefined);
+              else await uazapiService.send(connection.instanceName, validatedPhone,
                 mediaUrl ? { [mediaType || 'image']: { url: mediaUrl }, caption: personalizedMessage || '' } : messagePayload,
                 campaign.tenantId || undefined);
               break;
@@ -521,6 +532,12 @@ export const interactiveCampaignDispatchService = {
         let messagePayload: any = null;
 
         switch (nodeType) {
+          case 'uazapi':
+            messagePayload = nodeConfig.composition || nodeConfig.payload;
+            if (messagePayload) {
+              messagePayload = replaceCompositionVariables(messagePayload, contact);
+            }
+            break;
           case 'text':
             const textContent = nodeConfig.content || '';
             const personalizedText = textContent
@@ -594,10 +611,12 @@ export const interactiveCampaignDispatchService = {
         let sendError: string | undefined;
 
         try {
+          if (nodeType === 'uazapi' && connection.provider !== 'UAZAPI') throw new Error('Este nó requer uma conexão Uazapi');
           switch (connection.provider) {
             case 'UAZAPI':
               if (!contact.tenantId) throw new Error('Empresa do contato não identificada');
-              await uazapiService.send(connection.instanceName, validatedPhone, messagePayload, contact.tenantId);
+              if (nodeType === 'uazapi') await uazapiService.sendComposition(connection.instanceName, validatedPhone, messagePayload, contact.tenantId);
+              else await uazapiService.send(connection.instanceName, validatedPhone, messagePayload, contact.tenantId);
               break;
             case 'WAHA':
               await sendMessage(

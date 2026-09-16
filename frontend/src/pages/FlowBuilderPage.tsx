@@ -1,3 +1,4 @@
+import { UazapiNode } from '../components/flow-nodes/UazapiNode';
 import { useCallback, useState, useEffect, DragEvent, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactFlow, {
@@ -48,6 +49,7 @@ const NODE_TYPES_CONFIG = {
   video: { label: '🎬 Vídeo', color: '#a78bfa', description: 'Vídeo' },
   audio: { label: '🎵 Áudio', color: '#f59e0b', description: 'Áudio' },
   document: { label: '📄 Arquivo', color: '#ec4899', description: 'Doc' },
+  uazapi: { label: '🧩 Uazapi avançado', color: '#25d366', description: 'Botões, listas, mídia' },
   ai: { label: '🤖 IA', color: '#8b5cf6', description: 'IA' },
   condition: { label: '❓ Condição', color: '#ffd700', description: 'Condição' },
   delay: { label: '⏱️ Delay', color: '#ff7a7a', description: 'Espera' },
@@ -146,6 +148,7 @@ function FlowBuilderPageInner() {
       document: DocumentNode,
       ai: AINode,
       action: ActionNode,
+      uazapi: UazapiNode,
       condition: ConditionNode,
       delay: DelayNode,
       httprest: HttpRestNode,
