@@ -1103,7 +1103,7 @@ export function CampaignsPage() {
                             className="px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 flex items-center gap-2"
                           >
                             <span className="text-lg">+</span>
-                            Adicionar composição Uazapi
+                            + adicionar bloco
                           </button>
                         </div>
 
