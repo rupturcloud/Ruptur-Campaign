@@ -7,6 +7,20 @@ import { AuthenticatedRequest } from '../middleware/auth';
 
 const prisma = new PrismaClient();
 
+function parseManualPhones(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  const tokens = value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean);
+  const phones: string[] = [];
+  for (const token of tokens) {
+    const phone = token.replace(/\D/g, '');
+    if (phone.length < 8 || phone.length > 15) {
+      throw new Error(`Número inválido: ${token}. Use DDI e somente números, por exemplo 5511999999999.`);
+    }
+    if (!phones.includes(phone)) phones.push(phone);
+  }
+  return phones;
+}
+
 // Validation rules
 export const campaignValidation = [
   body('nome').notEmpty().withMessage('Nome da campanha é obrigatório'),
@@ -151,6 +165,7 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
       nome,
       targetTags,
       sessionNames,
+      manualPhones,
       messageType,
       messageContent,
       randomDelay,
@@ -198,6 +213,17 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
       });
     }
 
+    let parsedManualPhones: string[];
+    try {
+      parsedManualPhones = parseManualPhones(manualPhones);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : 'Números manuais inválidos' });
+    }
+
+    if (targetTags.length === 0 && parsedManualPhones.length === 0) {
+      return res.status(400).json({ error: 'Selecione categorias ou informe pelo menos um número manual' });
+    }
+
     // Buscar contatos usando ContactService com tenant isolation
     const tenantId = req.tenantId;
 
@@ -208,7 +234,7 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
     };
 
     const filteredContacts = await prisma.contact.findMany({
-      where: whereContacts,
+      where: targetTags.length > 0 ? whereContacts : { id: '__none__' },
       select: {
         id: true,
         nome: true,
@@ -218,10 +244,21 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
     });
 
     console.log(`📊 Categorias selecionadas:`, targetTags);
-    console.log(`📊 Contatos encontrados com essas categorias:`, filteredContacts.length);
+    const manualContacts = [] as Array<{ id: string; nome: string; telefone: string; categoriaId: string | null }>;
+    for (const phone of parsedManualPhones) {
+      const existing = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
+      manualContacts.push(existing || await prisma.contact.create({ data: {
+        nome: `Lead manual ${phone}`, telefone: phone, tenantId, tags: []
+      }, select: { id: true, nome: true, telefone: true, categoriaId: true } }));
+    }
+    const contactsByPhone = new Map<string, any>();
+    [...filteredContacts, ...manualContacts].forEach(contact => contactsByPhone.set(contact.telefone, contact));
+    const campaignContacts = [...contactsByPhone.values()];
 
-    if (filteredContacts.length === 0) {
-      return res.status(400).json({ error: 'Nenhum contato encontrado com as categorias selecionadas' });
+    console.log(`📊 Contatos encontrados com categorias:`, filteredContacts.length, '· manuais:', manualContacts.length);
+
+    if (campaignContacts.length === 0) {
+      return res.status(400).json({ error: 'Nenhum contato encontrado e nenhum número manual informado' });
     }
 
     // Criar campanha
@@ -236,7 +273,7 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
         randomDelay,
         startImmediately,
         scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
-        totalContacts: filteredContacts.length,
+        totalContacts: campaignContacts.length,
         status: startImmediately ? 'RUNNING' : 'PENDING',
         startedAt: startImmediately ? new Date() : null,
         createdBy: req.user?.id,
@@ -246,7 +283,7 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
     });
 
     // Criar mensagens para cada contato filtrado
-    const campaignMessages = filteredContacts.map((contact: any) => ({
+    const campaignMessages = campaignContacts.map((contact: any) => ({
       campaignId: campaign.id,
       contactId: contact.id,
       contactPhone: contact.telefone,

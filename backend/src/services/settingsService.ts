@@ -23,7 +23,8 @@ export class SettingsService {
         settings = await prisma.globalSettings.create({
           data: {
             singleton: true,
-            wahaHost: '',
+            uazapiHost: '',
+        wahaHost: '',
             wahaApiKey: '',
             evolutionHost: '',
             evolutionApiKey: '',
@@ -41,6 +42,7 @@ export class SettingsService {
       console.error('Error getting settings:', error);
       // Retornar configurações padrão se houver erro
       return {
+        uazapiHost: '',
         wahaHost: '',
         wahaApiKey: '',
         evolutionHost: '',
@@ -58,6 +60,7 @@ export class SettingsService {
   }
 
   async updateSettings(data: {
+    uazapiHost?: string;
     wahaHost?: string;
     wahaApiKey?: string;
     evolutionHost?: string;
@@ -80,6 +83,7 @@ export class SettingsService {
         settings = await prisma.globalSettings.update({
           where: { id: settings.id },
           data: {
+            uazapiHost: data.uazapiHost !== undefined ? data.uazapiHost : settings.uazapiHost,
             wahaHost: data.wahaHost !== undefined ? data.wahaHost : settings.wahaHost,
             wahaApiKey: data.wahaApiKey !== undefined ? data.wahaApiKey : settings.wahaApiKey,
             evolutionHost: data.evolutionHost !== undefined ? data.evolutionHost : settings.evolutionHost,
@@ -99,6 +103,7 @@ export class SettingsService {
         settings = await prisma.globalSettings.create({
           data: {
             singleton: true,
+            uazapiHost: data.uazapiHost || '',
             wahaHost: data.wahaHost || '',
             wahaApiKey: data.wahaApiKey || '',
             evolutionHost: data.evolutionHost || '',

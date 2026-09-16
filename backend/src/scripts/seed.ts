@@ -4,6 +4,10 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
+  if (await prisma.user.count() > 0) {
+    console.log('Existing installation: bootstrap skipped.');
+    return;
+  }
   console.log('🌱 Starting default setup seed...');
 
   // 1. Create GlobalSettings (singleton)
@@ -69,17 +73,16 @@ async function main() {
   console.log('✅ Default tenant settings created');
 
   // 5. Create SUPERADMIN user
-  const superAdminPassword = await bcrypt.hash('Admin123', 12);
+  const superAdminPassword = await bcrypt.hash(require('fs').readFileSync('/run/secrets/admin_password', 'utf8').trim(), 12);
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'superadmin@astraonline.com.br' },
+    where: { email: 'superadmin@ruptur.cloud' },
     update: {
       role: 'SUPERADMIN',
       tenantId: null,
-      senha: superAdminPassword,
     },
     create: {
       nome: 'Super Administrador',
-      email: 'superadmin@astraonline.com.br',
+      email: 'superadmin@ruptur.cloud',
       senha: superAdminPassword,
       role: 'SUPERADMIN',
       tenantId: null,
@@ -87,20 +90,19 @@ async function main() {
     }
   });
 
-  console.log('✅ SUPERADMIN created: superadmin@astraonline.com.br');
+  console.log('✅ SUPERADMIN created: superadmin@ruptur.cloud');
 
   // 6. Create default ADMIN user for the tenant
-  const adminPassword = await bcrypt.hash('Admin123', 12);
+  const adminPassword = await bcrypt.hash(require('fs').readFileSync('/run/secrets/admin_password', 'utf8').trim(), 12);
   const defaultAdmin = await prisma.user.upsert({
-    where: { email: 'admin@astraonline.com.br' },
+    where: { email: 'admin@ruptur.cloud' },
     update: {
       role: 'ADMIN',
       tenantId: defaultTenant.id,
-      senha: adminPassword,
     },
     create: {
       nome: 'Administrador',
-      email: 'admin@astraonline.com.br',
+      email: 'admin@ruptur.cloud',
       senha: adminPassword,
       role: 'ADMIN',
       tenantId: defaultTenant.id,
@@ -108,7 +110,7 @@ async function main() {
     }
   });
 
-  console.log('✅ Default ADMIN created: admin@astraonline.com.br');
+  console.log('✅ Default ADMIN created: admin@ruptur.cloud');
 
   // 6.1. Create UserTenant associations
   await prisma.userTenant.upsert({
@@ -183,8 +185,8 @@ async function main() {
   console.log('🎉 Default setup completed successfully!');
   console.log('📋 Summary:');
   console.log(`   - Default Tenant: ${defaultTenant.slug} (${defaultTenant.name})`);
-  console.log(`   - SUPERADMIN: superadmin@astraonline.com.br / Admin123`);
-  console.log(`   - Default ADMIN: admin@astraonline.com.br / Admin123`);
+  console.log(`   - SUPERADMIN: superadmin@ruptur.cloud`);
+  console.log(`   - Default ADMIN: admin@ruptur.cloud`);
   console.log(`   - Global Settings: Created`);
 }
 

@@ -1,0 +1,85 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+const { uazapiService } = require('../dist/services/uazapiService');
+const { interactiveCampaignSessionService } = require('../dist/services/interactiveCampaignSessionService');
+const { interactiveCampaignFlowEngine } = require('../dist/services/interactiveCampaignFlowEngine');
+const sessionRouter = require('../dist/routes/waha').default;
+const webhookRouter = require('../dist/routes/incomingWebhookRoutes').default;
+test('Uazapi lifecycle, secret protection, tenant isolation and authenticated webhooks', { timeout: 30000 }, async t => {
+  const calls = [];
+  let state = 'connected';
+  let hooks = [{ id: 'unrelated', url: 'https://other.example/webhook' }];
+  const provider = http.createServer(async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const body = raw ? JSON.parse(raw) : undefined;
+    calls.push({ path: req.url, body, token: req.headers.token });
+    res.setHeader('Content-Type','application/json');
+    if (req.headers.token !== 'fixture-uazapi-token') { res.statusCode = 401; return res.end('{"error":"invalid"}'); }
+    if (req.url === '/instance/connect') state = 'connecting';
+    if (req.url === '/instance/disconnect') state = 'disconnected';
+    if (req.url === '/webhook') {
+      if (body?.action === 'add') hooks.push({ ...body, id: 'campaign-hook' });
+      if (body?.action === 'delete') hooks = hooks.filter(h => h.id !== body.id);
+      return res.end(JSON.stringify(hooks));
+    }
+    if (req.url === '/send/text' || req.url === '/send/media') return res.end('{"messageid":"isolated-provider-message"}');
+    if (req.url === '/chat/check') return res.end('[{"isInWhatsapp":true,"jid":"5511999999999@s.whatsapp.net"}]');
+    res.end(JSON.stringify({ instance: { id: 'fixture-instance', status: state, qrcode: state === 'connecting' ? 'YWJj' : '', profileName: 'Fixture', owner: '5511999999999@s.whatsapp.net' }, status: { connected: state === 'connected' } }));
+  });
+  await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));
+  const host = `http://127.0.0.1:${provider.address().port}`;
+  const app = express(); app.use(express.json()); app.use('/api/waha',sessionRouter); app.use('/api/webhooks',webhookRouter);
+  const server = app.listen(0,'127.0.0.1'); await new Promise(resolve=>server.once('listening',resolve));
+  t.after(async()=>{server.closeAllConnections();server.close();provider.closeAllConnections();provider.close();await prisma.$disconnect();});
+  const tenantA=await prisma.tenant.create({data:{name:'Fixture A',slug:'fixture-a'}});
+  const tenantB=await prisma.tenant.create({data:{name:'Fixture B',slug:'fixture-b',allowedProviders:['WAHA']}});
+  const user=await prisma.user.create({data:{nome:'Fixture',email:'fixture@example.test',senha:'unused',role:'SUPERADMIN'}});
+  const token=jwt.sign({userId:user.id},process.env.JWT_SECRET);
+  const api=async(path,method='GET',body,tenant=tenantA.id,auth=true)=>{
+    const response=await fetch(`http://127.0.0.1:${server.address().port}`+path,{method,headers:{'Content-Type':'application/json',...(auth?{Authorization:`Bearer ${token}`,'X-Tenant-Id':tenant}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    return {status:response.status,body:await response.json()};
+  };
+  const input={name:'Fixture',provider:'UAZAPI',uazapiHost:host,uazapiToken:'fixture-uazapi-token',interactiveCampaignEnabled:true};
+  assert.equal((await api('/api/waha/sessions','POST',input,tenantB.id)).status,403);
+  const created=await api('/api/waha/sessions','POST',input); assert.equal(created.status,200,JSON.stringify(created.body));
+  assert.equal(created.body.provider,'UAZAPI');assert.equal(created.body.status,'WORKING');
+  assert.ok(!JSON.stringify(created.body).includes('fixture-uazapi-token'));
+  const session=await prisma.whatsAppSession.findUnique({where:{name:created.body.name}});
+  assert.ok(session.uazapiToken.startsWith('v1.'));assert.ok(!session.uazapiToken.includes('fixture-uazapi-token'));
+  assert.equal(hooks.length,2);assert.equal(hooks[0].id,'unrelated');
+  const base='/api/waha/sessions/'+encodeURIComponent(session.name);
+  const before=calls.length;
+  for(const [method,suffix] of [['GET',''],['POST','/start'],['POST','/restart'],['POST','/stop'],['DELETE','']]) assert.equal((await api(base+suffix,method,undefined,tenantB.id)).status,404);
+  assert.equal(calls.length,before,'cross-tenant actions must not call the provider');
+  assert.equal((await api(base+'/restart','POST',undefined,tenantA.id,false)).status,401);
+  assert.equal((await api(base+'/start','POST')).body.status,'SCAN_QR_CODE');
+  assert.equal((await api(base+'/auth/qr')).body.qr,'data:image/png;base64,YWJj');
+  state='connected';assert.equal((await api(base+'/status')).body.status,'WORKING');
+  const listed=await api('/api/waha/sessions');assert.equal(listed.status,200);assert.ok(!JSON.stringify(listed.body).includes('fixture-uazapi-token'));assert.ok(!JSON.stringify(listed.body).includes(session.uazapiToken));
+  assert.equal((await uazapiService.send(session.name,'5511999999999',{text:'fixture'},tenantA.id)).id,'isolated-provider-message');
+  await assert.rejects(uazapiService.send(session.name,'5511999999999',{text:'wrong tenant'},tenantB.id));
+  assert.equal((await uazapiService.checkContact(session.name,'5511999999999',tenantA.id)).exists,true);
+  let processed=0;const original=interactiveCampaignFlowEngine.processIncomingMessage;
+  interactiveCampaignFlowEngine.processIncomingMessage=async data=>{processed++;assert.equal(data.uazapiScope.tenantId,tenantA.id);assert.equal(data.uazapiScope.connectionId,session.id);return {processed:true};};
+  t.after(()=>{interactiveCampaignFlowEngine.processIncomingMessage=original;});
+  const event={EventType:'messages',message:{messageid:'webhook-fixture',sender:'5511999999999@s.whatsapp.net',text:'test'}};
+  const hook='/api/webhooks/incoming/'+session.id+'/';
+  assert.equal((await api(hook+'wrong','POST',event,tenantA.id,false)).status,401);
+  assert.equal((await api(hook+session.webhookSecret,'POST',event,tenantA.id,false)).status,200);
+  assert.equal((await api(hook+session.webhookSecret,'POST',event,tenantA.id,false)).body.message,'Duplicate ignored');assert.equal(processed,1);
+  // Same contact number in different tenants and/or source connections must not match.
+  const contactA=await prisma.contact.create({data:{nome:'A',telefone:'5511999999999',tenantId:tenantA.id}});
+  const campaignA=await prisma.interactiveCampaign.create({data:{name:'A',status:'COMPLETED',graph:{nodes:[],edges:[]},tenantId:tenantA.id}});
+  await interactiveCampaignSessionService.upsertSession({campaignId:campaignA.id,contactId:contactA.id,contactPhone:'5511999999999@s.whatsapp.net',currentNodeId:'node',tenantId:tenantA.id,variables:{uazapiConnectionId:session.id}});
+  assert.ok(await interactiveCampaignSessionService.getActiveSessionByPhone('5511999999999',{tenantId:tenantA.id,connectionId:session.id}));
+  assert.equal(await interactiveCampaignSessionService.getActiveSessionByPhone('5511999999999',{tenantId:tenantB.id,connectionId:session.id}),null);
+  assert.equal(await interactiveCampaignSessionService.getActiveSessionByPhone('5511999999999',{tenantId:tenantA.id,connectionId:'other'}),null);
+  assert.equal((await api(base+'/stop','POST')).body.status,'STOPPED');
+  assert.equal((await api(base,'DELETE')).status,200);assert.equal(hooks.length,1);assert.equal(hooks[0].id,'unrelated');
+  assert.equal(await prisma.whatsAppSession.count(),0);
+});

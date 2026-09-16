@@ -4,7 +4,7 @@ import crypto from 'crypto';
 const prisma = new PrismaClient();
 
 export interface CreateConnectionDto {
-  provider: 'EVOLUTION' | 'WAHA' | 'QUEPASA';
+  provider: 'EVOLUTION' | 'WAHA' | 'QUEPASA' | 'UAZAPI';
   instanceName: string;
   phoneNumber: string;
   tenantId?: string;

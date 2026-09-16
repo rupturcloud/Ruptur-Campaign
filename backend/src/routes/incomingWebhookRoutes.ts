@@ -1,3 +1,4 @@
+import { extractUazapiMessage } from '../services/uazapiClient';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
@@ -16,7 +17,7 @@ router.post('/incoming/:sessionId/:webhookSecret', async (req: Request, res: Res
     const payload = req.body;
 
     console.log(`📨 Webhook recebido - SessionId: ${sessionId}`);
-    console.log(`📦 Payload:`, JSON.stringify(payload, null, 2));
+
 
     // Buscar sessão no banco de dados
     const session = await prisma.whatsAppSession.findUnique({
@@ -26,6 +27,28 @@ router.post('/incoming/:sessionId/:webhookSecret', async (req: Request, res: Res
     if (!session) {
       console.error(`❌ Sessão não encontrada: ${sessionId}`);
       return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.provider === 'UAZAPI') {
+      const expected = Buffer.from(session.webhookSecret || '');
+      const supplied = Buffer.from(webhookSecret);
+      if (!expected.length || expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) {
+        return res.status(401).json({ error: 'Invalid webhook secret' });
+      }
+      if (!session.interactiveCampaignEnabled || !session.tenantId) return res.json({ message: 'Interactive campaign not enabled' });
+      const message = extractUazapiMessage(payload);
+      if (!message) return res.json({ message: 'Message ignored' });
+      const receiptId = crypto.createHash('sha256').update(session.id + ':' + message.messageId).digest('hex');
+      try { await prisma.uazapiWebhookReceipt.create({ data: { id: receiptId } }); }
+      catch (error: any) {
+        if (error.code === 'P2002') return res.json({ message: 'Duplicate ignored' });
+        throw error;
+      }
+      const result = await interactiveCampaignFlowEngine.processIncomingMessage({
+        contactPhone: message.fromNumber, messageContent: message.content, sessionId: session.id,
+        uazapiScope: { tenantId: session.tenantId, connectionId: session.id }
+      });
+      return res.json({ success: true, flowResult: result });
     }
 
     // Validar webhook secret (temporariamente desabilitado para debug)

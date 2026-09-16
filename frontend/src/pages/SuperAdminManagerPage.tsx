@@ -13,7 +13,7 @@ interface Tenant {
   name: string;
   domain?: string;
   active: boolean;
-  allowedProviders?: string[]; // ['WAHA', 'EVOLUTION', 'QUEPASA']
+  allowedProviders?: string[]; // ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']
   createdAt: string;
   updatedAt: string;
   _count?: {
@@ -60,7 +60,7 @@ interface TenantFormData {
     maxCampaigns: string;
     maxConnections: string;
   };
-  allowedProviders: string[]; // ['WAHA', 'EVOLUTION', 'QUEPASA']
+  allowedProviders: string[]; // ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']
 }
 
 interface UserFormData {
@@ -128,6 +128,7 @@ interface BackupStats {
 
 interface Settings {
   id: string;
+  uazapiHost?: string;
   wahaHost: string;
   wahaApiKey: string;
   evolutionHost: string;
@@ -145,6 +146,7 @@ interface Settings {
 }
 
 const settingsSchema = z.object({
+  uazapiHost: z.string().refine(val => !val || z.string().url().safeParse(val).success, { message: 'Informe uma URL válida' }).optional(),
   wahaHost: z.string().refine((val) => !val || z.string().url().safeParse(val).success, {
     message: 'Host deve ser uma URL válida ou vazio'
   }),
@@ -203,7 +205,7 @@ export function SuperAdminManagerPage() {
       maxCampaigns: '50',
       maxConnections: '5'
     },
-    allowedProviders: ['WAHA', 'EVOLUTION', 'QUEPASA']
+    allowedProviders: ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']
   });
   const [userFormData, setUserFormData] = useState<UserFormData>({
     nome: '',
@@ -216,7 +218,7 @@ export function SuperAdminManagerPage() {
   });
   const [tenantSearchQuery, setTenantSearchQuery] = useState('');
 
-  const [activeModal, setActiveModal] = useState<'waha' | 'evolution' | 'quepasa' | null>(null);
+  const [activeModal, setActiveModal] = useState<'waha' | 'evolution' | 'quepasa' | 'uazapi' | null>(null);
   const [integrationSettings, setIntegrationSettings] = useState<Settings | null>(null);
 
   // General settings states
@@ -344,6 +346,7 @@ export function SuperAdminManagerPage() {
         setIntegrationSettings(data);
         setValue('wahaHost', data.wahaHost);
         setValue('wahaApiKey', data.wahaApiKey);
+        setValue('uazapiHost', data.uazapiHost || '');
         setValue('evolutionHost', data.evolutionHost);
         setValue('evolutionApiKey', data.evolutionApiKey);
         setValue('quepasaUrl', data.quepasaUrl || '');
@@ -639,7 +642,7 @@ export function SuperAdminManagerPage() {
         maxCampaigns: '50',
         maxConnections: '5'
       },
-      allowedProviders: ['WAHA', 'EVOLUTION', 'QUEPASA']
+      allowedProviders: ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']
     });
     setIsModalOpen(true);
   };
@@ -659,7 +662,7 @@ export function SuperAdminManagerPage() {
         maxCampaigns: tenant.quota?.maxCampaigns?.toString() || '50',
         maxConnections: tenant.quota?.maxConnections?.toString() || '5'
       },
-      allowedProviders: tenant.allowedProviders || ['WAHA', 'EVOLUTION', 'QUEPASA']
+      allowedProviders: tenant.allowedProviders || ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']
     });
     setIsModalOpen(true);
   };
@@ -1510,7 +1513,7 @@ export function SuperAdminManagerPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          const allProviders = ['WAHA', 'EVOLUTION', 'QUEPASA'];
+                          const allProviders = ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI'];
                           const allSelected = allProviders.every(p => formData.allowedProviders.includes(p));
                           setFormData({
                             ...formData,
@@ -1519,7 +1522,7 @@ export function SuperAdminManagerPage() {
                         }}
                         className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                       >
-                        {formData.allowedProviders.length === 3 ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                        {formData.allowedProviders.length === 4 ? 'Desmarcar Todos' : 'Selecionar Todos'}
                       </button>
                     </div>
                     <div className="space-y-2">
@@ -1570,6 +1573,22 @@ export function SuperAdminManagerPage() {
                         />
                         <img src="/iconequepasa.png" alt="Quepasa" className="w-6 h-6 object-contain" />
                         <span className="text-sm font-medium text-gray-700">Quepasa</span>
+                      </label>
+                      <label className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer border border-gray-200">
+                        <input
+                          type="checkbox"
+                          checked={formData.allowedProviders.includes('UAZAPI')}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormData({ ...formData, allowedProviders: [...formData.allowedProviders, 'UAZAPI'] });
+                            } else {
+                              setFormData({ ...formData, allowedProviders: formData.allowedProviders.filter(p => p !== 'UAZAPI') });
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <img src="/iconeuazapi.svg" alt="Uazapi" className="w-6 h-6 object-contain" />
+                        <span className="text-sm font-medium text-gray-700">Uazapi</span>
                       </label>
                     </div>
                     {formData.allowedProviders.length === 0 && (
@@ -1866,6 +1885,13 @@ export function SuperAdminManagerPage() {
 
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <button type="button" onClick={() => setActiveModal('uazapi')}
+                className="bg-gray-50 hover:bg-gray-100 border-2 border-gray-200 hover:border-cyan-400 rounded-lg p-6 transition-all flex flex-col items-center min-h-[180px]">
+                <img src="/iconeuazapi.svg" alt="" className="w-12 h-12 mb-3" />
+                <span className="text-lg font-semibold text-gray-900">Uazapi</span>
+                <span className="text-xs text-gray-500 mt-2">WhatsApp API v2</span>
+                <span className="text-xs text-gray-600 mt-2">{integrationSettings?.uazapiHost ? 'URL configurada' : 'Configurar servidor'}</span>
+              </button>
               {/* WAHA Card */}
               <div
                 onClick={() => setActiveModal('waha')}
@@ -2287,6 +2313,25 @@ export function SuperAdminManagerPage() {
                 >
                   {isSubmitting ? 'Salvando...' : 'Salvar'}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'uazapi' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4" role="dialog" aria-labelledby="uazapi-config-title">
+            <h3 id="uazapi-config-title" className="text-lg font-semibold text-gray-900 mb-4">Configurar Uazapi</h3>
+            <form onSubmit={handleFormSubmit(onIntegrationSubmit)} className="space-y-4">
+              <label htmlFor="uazapiHost" className="block text-sm font-medium text-gray-700">URL padrão do servidor</label>
+              <input id="uazapiHost" type="url" {...register('uazapiHost')} placeholder="https://seu-servidor.uazapi.com"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              {errors.uazapiHost && <p className="text-red-500 text-sm">{errors.uazapiHost.message}</p>}
+              <p className="text-sm text-gray-600">Em Conexões, selecione Uazapi e informe o token de cada instância. A URL também pode ser informada por conexão.</p>
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 px-4 py-2 bg-gray-100 rounded-md">Cancelar</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 px-4 py-2 bg-cyan-700 text-white rounded-md">{isSubmitting ? 'Salvando...' : 'Salvar'}</button>
               </div>
             </form>
           </div>

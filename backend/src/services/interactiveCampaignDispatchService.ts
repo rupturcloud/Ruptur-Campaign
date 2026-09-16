@@ -1,3 +1,4 @@
+import { uazapiService } from './uazapiService';
 /**
  * Interactive Campaign Dispatch Service
  * Envia mensagens iniciais de campanhas interativas para contatos configurados
@@ -191,7 +192,7 @@ export const interactiveCampaignDispatchService = {
       // Converter WhatsAppSession para formato de Connection
       const convertedOldConnections = connectionDataOld.map((session) => ({
         id: session.id,
-        provider: (session.provider || 'WAHA') as 'WAHA' | 'EVOLUTION' | 'QUEPASA',
+        provider: (session.provider || 'WAHA') as 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI',
         instanceName: session.name,
         phoneNumber: session.meJid || session.name,
         status: 'ACTIVE' as const,
@@ -245,7 +246,9 @@ export const interactiveCampaignDispatchService = {
           }
 
           // Verificar existência do contato
-          if (connection.provider === 'EVOLUTION') {
+          if (connection.provider === 'UAZAPI') {
+            contactCheck = await uazapiService.checkContact(connection.instanceName, contact.telefone, campaign.tenantId || undefined);
+          } else if (connection.provider === 'EVOLUTION') {
             contactCheck = await checkContactExistsEvolution(connection.instanceName, contact.telefone);
           } else if (connection.provider === 'QUEPASA') {
             contactCheck = await checkContactExistsQuepasa(connection.instanceName, contact.telefone, sessionToken);
@@ -307,6 +310,11 @@ export const interactiveCampaignDispatchService = {
 
           // Enviar baseado no provider usando número validado
           switch (connection.provider) {
+            case 'UAZAPI':
+              await uazapiService.send(connection.instanceName, validatedPhone,
+                mediaUrl ? { [mediaType || 'image']: { url: mediaUrl }, caption: personalizedMessage || '' } : messagePayload,
+                campaign.tenantId || undefined);
+              break;
             case 'WAHA':
               // Para WAHA, passar o chatId validado diretamente
               await sendMessage(
@@ -347,6 +355,7 @@ export const interactiveCampaignDispatchService = {
             tenantId: campaign.tenantId || undefined,
             variables: {
               nome: contact.nome,
+              ...(connection.provider === 'UAZAPI' ? { uazapiConnectionId: connection.id } : {}),
               telefone: validatedPhone, // Usar número validado
             },
           });
@@ -586,6 +595,10 @@ export const interactiveCampaignDispatchService = {
 
         try {
           switch (connection.provider) {
+            case 'UAZAPI':
+              if (!contact.tenantId) throw new Error('Empresa do contato não identificada');
+              await uazapiService.send(connection.instanceName, validatedPhone, messagePayload, contact.tenantId);
+              break;
             case 'WAHA':
               await sendMessage(
                 connection.instanceName,

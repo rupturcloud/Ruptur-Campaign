@@ -20,7 +20,7 @@ export class TenantController {
         // Se não há tenant, retornar todos os provedores (para superadmin sem tenant selecionado)
         return res.json({
           success: true,
-          allowedProviders: ['WAHA', 'EVOLUTION', 'QUEPASA']
+          allowedProviders: ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']
         });
       }
 
@@ -36,9 +36,10 @@ export class TenantController {
         });
       }
 
+      const allowedProviders = Array.from(new Set([...(tenant.allowedProviders || []), 'UAZAPI']));
       res.json({
         success: true,
-        allowedProviders: tenant.allowedProviders || ['WAHA', 'EVOLUTION', 'QUEPASA']
+        allowedProviders
       });
     } catch (error) {
       console.error('❌ TenantController.getAllowedProviders - erro:', error);
@@ -148,7 +149,7 @@ export class TenantController {
       }
 
       // Validar provedores permitidos (se não informado, usar todos)
-      const validProviders = ['WAHA', 'EVOLUTION', 'QUEPASA'];
+      const validProviders = ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI'];
       const providers = Array.isArray(allowedProviders) && allowedProviders.length > 0
         ? allowedProviders.filter((p: string) => validProviders.includes(p))
         : validProviders;
@@ -344,7 +345,7 @@ export class TenantController {
       }
 
       // Validar provedores permitidos se fornecido
-      const validProviders = ['WAHA', 'EVOLUTION', 'QUEPASA'];
+      const validProviders = ['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI'];
       const providers = Array.isArray(allowedProviders)
         ? allowedProviders.filter((p: string) => validProviders.includes(p))
         : undefined;

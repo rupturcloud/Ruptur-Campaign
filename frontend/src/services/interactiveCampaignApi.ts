@@ -2,7 +2,7 @@ const API_BASE_URL = '/api';
 
 export interface Connection {
   id: string;
-  provider: 'EVOLUTION' | 'WAHA' | 'QUEPASA';
+  provider: 'EVOLUTION' | 'WAHA' | 'QUEPASA' | 'UAZAPI';
   instanceName: string;
   phoneNumber: string;
   status: 'ACTIVE' | 'INACTIVE' | 'ERROR';
@@ -29,7 +29,7 @@ export interface InteractiveCampaign {
 }
 
 export interface CreateConnectionDto {
-  provider: 'EVOLUTION' | 'WAHA' | 'QUEPASA';
+  provider: 'EVOLUTION' | 'WAHA' | 'QUEPASA' | 'UAZAPI';
   instanceName: string;
   phoneNumber: string;
 }

@@ -241,6 +241,7 @@ O **Astra Campaign** é uma **plataforma SaaS multi-tenant** completa e open-sou
 - **WAHA API** - WhatsApp Web API
 - **Evolution API** - API alternativa para WhatsApp
 - **QuePasa** - API WhatsApp multi-dispositivo
+- **Uazapi API** - API WhatsApp por instância, com QR, mensagens e campanhas interativas
 - **Chatwoot** - Importação de contatos e criação de tickets
 - **Perfex CRM** - Sincronização de leads e gestão de CRM (NOVO v0.0.4)
 - **OpenAI API** - GPT para geração de conteúdo e processamento de respostas
@@ -456,7 +457,7 @@ interface WhatsAppSession {
   name: string;
   displayName?: string;
   status: string;
-  provider: 'WAHA' | 'EVOLUTION' | 'QUEPASA';
+  provider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI';
   qr?: string;
   quepasaToken?: string; // Token para QuePasa
 }
@@ -480,6 +481,8 @@ DEFAULT_EVOLUTION_HOST=http://evolution:8080
 DEFAULT_EVOLUTION_API_KEY=sua-evolution-api-key
 DEFAULT_QUEPASA_HOST=http://quepasa:31000
 DEFAULT_QUEPASA_TOKEN=seu-quepasa-token
+# Uazapi (o token da instância é informado ao criar a conexão; nunca é exposto ao navegador)
+DEFAULT_UAZAPI_HOST=https://seu-servidor-uazapi.example
 
 # Integração Chatwoot
 DEFAULT_CHATWOOT_URL=https://seu-chatwoot.com
@@ -549,6 +552,12 @@ Para usar o QuePasa como provedor WhatsApp:
    - Envio de vídeos com legenda
    - Envio de documentos
    - Status da conexão em tempo real
+
+### 🔌 **Configuração da Uazapi API**
+
+1. Informe o host padrão (`uazapiHost`) nas configurações globais ou forneça-o ao criar a conexão.
+2. Na página de Conexões WhatsApp, selecione **Uazapi**, informe o token da instância e escolha se a campanha interativa será habilitada.
+3. A conexão consulta o status da instância, mostra o QR Code e usa o mesmo fluxo de campanhas dos demais provedores. O token é armazenado cifrado no backend.
 
 ### 🎲 **Randomização de Conteúdo**
 

@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 
 interface Settings {
   id: string;
+  uazapiHost?: string;
+  evolutionHost?: string;
+  evolutionApiKey?: string;
+  quepasaUrl?: string;
+  quepasaLogin?: string;
+  quepasaPassword?: string;
   wahaHost: string;
   wahaApiKey: string;
   logoUrl?: string;

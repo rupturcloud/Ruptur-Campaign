@@ -60,6 +60,7 @@ export const interactiveCampaignSessionService = {
         currentNodeId: data.currentNodeId,
         lastMessageAt: new Date(),
         status: data.status || 'ACTIVE',
+        ...(data.variables?.uazapiConnectionId ? { variables: data.variables } : {}),
       },
     });
   },
@@ -84,16 +85,17 @@ export const interactiveCampaignSessionService = {
   /**
    * Busca sessão ativa por telefone (para webhook)
    */
-  async getActiveSessionByPhone(contactPhone: string) {
+  async getActiveSessionByPhone(contactPhone: string, scope?: { tenantId: string; connectionId: string }) {
     // Normalizar telefone (remover caracteres especiais)
     const normalizedPhone = contactPhone.replace(/[^\d]/g, '');
 
     return prisma.interactiveCampaignSession.findFirst({
       where: {
         contactPhone: {
-          contains: normalizedPhone,
+          ...(scope ? { in: [normalizedPhone, '+' + normalizedPhone, normalizedPhone + '@s.whatsapp.net'] } : { contains: normalizedPhone }),
         },
         status: 'ACTIVE',
+        ...(scope ? { tenantId: scope.tenantId, campaign: { tenantId: scope.tenantId }, variables: { path: ['uazapiConnectionId'], equals: scope.connectionId } } : {}),
       },
       include: {
         campaign: true,

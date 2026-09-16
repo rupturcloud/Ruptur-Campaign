@@ -1,3 +1,4 @@
+import { uazapiService } from './uazapiService';
 import { PrismaClient } from '@prisma/client';
 import { sendMessage, checkContactExists } from './wahaApiService';
 import { sendMessageViaEvolution, checkContactExistsEvolution } from './evolutionMessageService';
@@ -304,7 +305,9 @@ class CampaignSchedulerService {
       // Verificar se o número existe no WhatsApp antes de enviar usando provedor correto
       let contactCheck: any = { exists: false };
 
-      if (provider === 'EVOLUTION') {
+      if (provider === 'UAZAPI') {
+        contactCheck = await uazapiService.checkContact(selectedSession, message.contactPhone, campaign.tenantId);
+      } else if (provider === 'EVOLUTION') {
         contactCheck = await checkContactExistsEvolution(selectedSession, message.contactPhone);
       } else if (provider === 'QUEPASA') {
         contactCheck = await checkContactExistsQuepasa(selectedSession, message.contactPhone, sessionToken);
@@ -346,7 +349,9 @@ class CampaignSchedulerService {
 
       // Enviar mensagem usando o provedor correto
       let result: any;
-      if (provider === 'EVOLUTION') {
+      if (provider === 'UAZAPI') {
+        result = await this.sendMessageViaUazapi(selectedSession, contactCheck.validPhone || message.contactPhone, campaign.messageType, processedContent, contact, campaign.tenantId);
+      } else if (provider === 'EVOLUTION') {
         result = await this.sendMessageViaEvolution(
           selectedSession,
           contactCheck.validPhone || message.contactPhone,
@@ -598,6 +603,132 @@ class CampaignSchedulerService {
       processedContent: content,
       variationInfo: null
     };
+  }
+
+  private async sendMessageViaUazapi(instanceName: string, phone: string, messageType: string, content: any, contactData?: any, tenantId?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      await uazapiService.session(instanceName, tenantId);
+      const sendForTenant = (name: string, number: string, payload: any) => uazapiService.send(name, number, payload, tenantId);
+      let result: any;
+
+      switch (messageType) {
+        case 'text':
+          result = await sendForTenant(instanceName, phone, { text: content.text });
+          break;
+
+        case 'image':
+          result = await sendForTenant(instanceName, phone, {
+            image: { url: content.url },
+            caption: content.caption || '',
+            fileName: 'imagem.png'
+          });
+          break;
+
+        case 'video':
+          result = await sendForTenant(instanceName, phone, {
+            video: { url: content.url },
+            caption: content.caption || '',
+            fileName: 'video.mp4'
+          });
+          break;
+
+        case 'audio':
+          result = await sendForTenant(instanceName, phone, {
+            audio: { url: content.url },
+            fileName: 'audio.ogg'
+          });
+          break;
+
+        case 'document':
+          result = await sendForTenant(instanceName, phone, {
+            document: { url: content.url },
+            fileName: content.fileName || 'documento.pdf',
+            caption: content.caption || ''
+          });
+          break;
+
+        case 'openai':
+          // Gerar mensagem usando OpenAI
+          console.log('🤖 Gerando mensagem com OpenAI (Uazapi)...', content);
+
+          const openaiResult = await openaiService.generateMessage(content, contactData, tenantId);
+
+          if (!openaiResult.success) {
+            throw new Error(`OpenAI error: ${openaiResult.error}`);
+          }
+
+          console.log('✅ Mensagem gerada pela OpenAI (Uazapi):', openaiResult.message);
+
+          // Enviar a mensagem gerada como texto
+          result = await sendForTenant(instanceName, phone, { text: openaiResult.message });
+          break;
+
+        case 'groq':
+          // Gerar mensagem usando Groq
+          console.log('⚡ Gerando mensagem com Groq (Uazapi)...', content);
+
+          const groqResult = await groqService.generateMessage(content, contactData, tenantId);
+
+          if (!groqResult.success) {
+            throw new Error(`Groq error: ${groqResult.error}`);
+          }
+
+          console.log('✅ Mensagem gerada pela Groq (Uazapi):', groqResult.message);
+
+          // Enviar a mensagem gerada como texto
+          result = await sendForTenant(instanceName, phone, { text: groqResult.message });
+          break;
+
+        case 'sequence':
+          // Para sequência, enviar todos os itens com delay entre eles
+          if (!content.sequence || content.sequence.length === 0) {
+            throw new Error('Sequence is empty');
+          }
+
+          let lastResult: any;
+          for (let i = 0; i < content.sequence.length; i++) {
+            const item = content.sequence[i];
+
+            // Tratar tipo 'wait' como delay personalizado
+            if (item.type === 'wait') {
+              const waitTime = item.content?.waitTime || 30; // Default 30 segundos se não especificado
+              console.log(`⏰ Aplicando espera personalizada de ${waitTime} segundos...`);
+              await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+
+              // Para o wait, consideramos como "sucesso" para continuar a sequência
+              lastResult = { success: true, messageId: lastResult?.messageId };
+              console.log(`✅ Espera de ${waitTime} segundos concluída`);
+              continue; // Pular para próximo item da sequência
+            }
+
+            lastResult = await this.sendMessageViaUazapi(instanceName, phone, item.type, item.content, contactData, tenantId);
+
+            if (!lastResult.success) {
+              throw new Error(`Failed to send sequence item ${i + 1}: ${lastResult.error}`);
+            }
+
+            // Adicionar delay de 2-5 segundos entre mensagens da sequência para evitar spam (apenas entre mensagens reais)
+            if (i < content.sequence.length - 1 && content.sequence[i + 1].type !== 'wait') {
+              const sequenceDelay = Math.floor(Math.random() * 3000) + 2000; // 2-5 segundos
+              await new Promise(resolve => setTimeout(resolve, sequenceDelay));
+            }
+          }
+          result = lastResult;
+          break;
+
+        default:
+          throw new Error(`Unsupported message type for Uazapi: ${messageType}`);
+      }
+
+      const messageId = result?.id || result?.messageId;
+      if (!messageId) throw new Error('Nenhuma mensagem confirmada pelo Uazapi');
+      return { success: true, messageId };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
   }
 
   private async sendMessageViaEvolution(instanceName: string, phone: string, messageType: string, content: any, contactData?: any, tenantId?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {

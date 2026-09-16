@@ -46,7 +46,7 @@ interface WhatsAppSession {
   name: string; // Nome real usado na API (ex: vendas_c52982e8)
   displayName?: string; // Nome exibido ao usuário (ex: vendas)
   status: 'WORKING' | 'SCAN_QR_CODE' | 'STOPPED' | 'FAILED';
-  provider: 'WAHA' | 'EVOLUTION' | 'QUEPASA';
+  provider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI';
   qr?: string;
   qrExpiresAt?: Date;
   me?: {
@@ -61,8 +61,10 @@ export function WhatsAppConnectionsPage() {
   const { selectedTenantId, loading: tenantLoading } = useTenant();
   const [sessions, setSessions] = useState<WhatsAppSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uazapiToken, setUazapiToken] = useState('');
+  const [uazapiHost, setUazapiHost] = useState('');
   const [newSessionName, setNewSessionName] = useState('');
-  const [newSessionProvider, setNewSessionProvider] = useState<'WAHA' | 'EVOLUTION' | 'QUEPASA'>('WAHA');
+  const [newSessionProvider, setNewSessionProvider] = useState<'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI'>('WAHA');
   const [interactiveCampaignEnabled, setInteractiveCampaignEnabled] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [loadingQR, setLoadingQR] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function WhatsAppConnectionsPage() {
   const [currentQRSession, setCurrentQRSession] = useState<WhatsAppSession | null>(null);
   const [createSessionModalOpen, setCreateSessionModalOpen] = useState(false);
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
-  const [allowedProviders, setAllowedProviders] = useState<string[]>(['WAHA', 'EVOLUTION', 'QUEPASA']);
+  const [allowedProviders, setAllowedProviders] = useState<string[]>(['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI']);
 
   // Preload das imagens dos provedores para carregamento instantâneo
   useEffect(() => {
@@ -116,10 +118,12 @@ export function WhatsAppConnectionsPage() {
       if (response.ok) {
         const data = await response.json();
         if (data.success && Array.isArray(data.allowedProviders)) {
-          setAllowedProviders(data.allowedProviders);
+          // Compatibilidade com tenants criados antes da migração de provedores.
+          const providers = Array.from(new Set([...data.allowedProviders, 'UAZAPI']));
+          setAllowedProviders(providers);
           // Definir o primeiro provedor permitido como padrão
-          if (data.allowedProviders.length > 0 && !data.allowedProviders.includes(newSessionProvider)) {
-            setNewSessionProvider(data.allowedProviders[0] as 'WAHA' | 'EVOLUTION' | 'QUEPASA');
+          if (providers.length > 0 && !providers.includes(newSessionProvider)) {
+            setNewSessionProvider(providers[0] as 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI');
           }
         }
       }
@@ -264,6 +268,11 @@ export function WhatsAppConnectionsPage() {
       return;
     }
 
+    if (newSessionProvider === 'UAZAPI' && (!(uazapiHost.trim() || settings?.uazapiHost) || !uazapiToken.trim())) {
+      toast.error('Informe a URL do servidor e o token da instância Uazapi');
+      return;
+    }
+
     setIsCreating(true);
     try {
       const response = await authenticatedFetch('/api/waha/sessions', {
@@ -271,6 +280,7 @@ export function WhatsAppConnectionsPage() {
         body: JSON.stringify({
           name: newSessionName.trim(),
           provider: newSessionProvider,
+          ...(newSessionProvider === 'UAZAPI' ? { uazapiHost: uazapiHost.trim() || settings?.uazapiHost, uazapiToken: uazapiToken.trim() } : {}),
           interactiveCampaignEnabled
         })
       });
@@ -294,6 +304,8 @@ export function WhatsAppConnectionsPage() {
 
       toast.success(`Sessão ${newSessionProvider} criada com sucesso`);
       setNewSessionName('');
+      setUazapiToken('');
+      setUazapiHost('');
       setNewSessionProvider('WAHA');
 
       // Recarregar imediatamente
@@ -569,14 +581,16 @@ export function WhatsAppConnectionsPage() {
                       }`}>
                         <img
                           src={
-                            session.provider === 'EVOLUTION' ? '/iconeevolutionapi.png' :
+                            session.provider === 'UAZAPI' ? '/iconeuazapi.svg' :
+                          session.provider === 'EVOLUTION' ? '/iconeevolutionapi.png' :
                             session.provider === 'QUEPASA' ? '/iconequepasa.png' :
                             '/iconewaha.png'
                           }
                           alt={session.provider}
                           className="w-4 h-4 object-contain"
                         />
-                        {session.provider === 'EVOLUTION' ? 'Evolution API' :
+                        {session.provider === 'UAZAPI' ? 'Uazapi' :
+                       session.provider === 'EVOLUTION' ? 'Evolution API' :
                          session.provider === 'QUEPASA' ? 'Quepasa' :
                          'Waha'}
                       </span>
@@ -593,7 +607,7 @@ export function WhatsAppConnectionsPage() {
                   </div>
 
                   <div className="flex gap-2 ml-4">
-                    {session.status === 'STOPPED' && (
+                    {(session.status === 'STOPPED' || (session.provider === 'UAZAPI' && session.status === 'FAILED')) && (
                       <button
                         onClick={() => requestQRCode(session.name)}
                         disabled={loadingQR === session.name}
@@ -614,7 +628,7 @@ export function WhatsAppConnectionsPage() {
                       onClick={() => restartSession(session.name)}
                       className="px-3 py-1 bg-yellow-600 text-white text-sm rounded-md hover:bg-yellow-700"
                     >
-                      Reiniciar
+                      {session.provider === 'UAZAPI' ? 'Reconectar' : 'Reiniciar'}
                     </button>
                     <button
                       onClick={() => deleteSession(session.name)}
@@ -635,7 +649,7 @@ export function WhatsAppConnectionsPage() {
       {createSessionModalOpen && (
         <Portal>
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center backdrop-blur-sm" style={{ zIndex: 9999 }}>
-            <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md border border-gray-100 m-4" role="dialog" aria-labelledby="create-session-title">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto border border-gray-100 m-4" role="dialog" aria-labelledby="create-session-title">
             <div className="text-center mb-8">
               <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl mx-auto mb-4 flex items-center justify-center">
                 <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -665,6 +679,7 @@ export function WhatsAppConnectionsPage() {
                     <span className="flex items-center gap-3">
                       <img
                         src={
+                          newSessionProvider === 'UAZAPI' ? '/iconeuazapi.svg' :
                           newSessionProvider === 'EVOLUTION' ? '/iconeevolutionapi.png' :
                           newSessionProvider === 'QUEPASA' ? '/iconequepasa.png' :
                           '/iconewaha.png'
@@ -672,7 +687,8 @@ export function WhatsAppConnectionsPage() {
                         alt={newSessionProvider}
                         className="w-5 h-5 object-contain"
                       />
-                      {newSessionProvider === 'EVOLUTION' ? 'Evolution API' :
+                      {newSessionProvider === 'UAZAPI' ? 'Uazapi' :
+                       newSessionProvider === 'EVOLUTION' ? 'Evolution API' :
                        newSessionProvider === 'QUEPASA' ? 'Quepasa' :
                        'Waha'}
                     </span>
@@ -688,6 +704,12 @@ export function WhatsAppConnectionsPage() {
                         onClick={() => setProviderDropdownOpen(false)}
                       />
                       <div className="absolute z-20 w-full mt-2 bg-white border border-gray-300 rounded-xl shadow-lg overflow-hidden">
+                        {allowedProviders.includes('UAZAPI') && (
+                          <button type="button" onClick={() => { setNewSessionProvider('UAZAPI'); setProviderDropdownOpen(false); }}
+                            className="w-full px-4 py-3 text-left flex items-center gap-3 hover:bg-blue-50 transition-colors">
+                            <img src="/iconeuazapi.svg" alt="" className="w-5 h-5" /><span className="text-sm">Uazapi</span>
+                          </button>
+                        )}
                         {allowedProviders.includes('WAHA') && (
                           <button
                             type="button"
@@ -741,6 +763,23 @@ export function WhatsAppConnectionsPage() {
                   Escolha o provedor para conectar ao WhatsApp
                 </p>
               </div>
+
+              {newSessionProvider === 'UAZAPI' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-600">Vincule uma instância existente do Uazapi v2. Use o token da instância, não o token administrativo.</p>
+                  <div>
+                    <label htmlFor="uazapi-session-host" className="block text-sm font-semibold text-gray-700 mb-2">URL do servidor Uazapi</label>
+                    <input id="uazapi-session-host" type="url" value={uazapiHost} onChange={e => setUazapiHost(e.target.value)}
+                      placeholder={settings?.uazapiHost || 'https://seu-servidor.uazapi.com'} disabled={isCreating}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm" />
+                  </div>
+                  <div>
+                    <label htmlFor="uazapi-session-token" className="block text-sm font-semibold text-gray-700 mb-2">Token da instância</label>
+                    <input id="uazapi-session-token" type="password" autoComplete="new-password" value={uazapiToken} onChange={e => setUazapiToken(e.target.value)}
+                      placeholder="Cole o token da instância" disabled={isCreating} className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm" />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label htmlFor="session-name" className="block text-sm font-semibold text-gray-700 mb-2">

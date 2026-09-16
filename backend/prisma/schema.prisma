@@ -17,7 +17,7 @@ model Tenant {
   slug             String   @unique // URL-friendly identifier
   name             String
   active           Boolean  @default(true)
-  allowedProviders String[] @default(["WAHA", "EVOLUTION", "QUEPASA"]) @map("allowed_providers") // Provedores WhatsApp permitidos
+  allowedProviders String[] @default(["WAHA", "EVOLUTION", "QUEPASA", "UAZAPI"]) @map("allowed_providers") // Provedores WhatsApp permitidos
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -103,6 +103,7 @@ model GlobalSettings {
   singleton       Boolean  @default(true) @unique // Ensures only one record
   wahaHost        String   @default("") @map("waha_host")
   wahaApiKey      String   @default("") @map("waha_api_key")
+  uazapiHost      String   @default("") @map("uazapi_host")
   evolutionHost   String   @default("") @map("evolution_host")
   evolutionApiKey String   @default("") @map("evolution_api_key")
   quepasaUrl      String   @default("") @map("quepasa_url")
@@ -182,6 +183,9 @@ model WhatsAppSession {
   criadoEm                   DateTime   @default(now()) @map("criado_em")
   atualizadoEm               DateTime   @updatedAt @map("atualizado_em")
   provider                   String     @default("WAHA")
+  uazapiHost                 String?    @map("uazapi_host")
+  uazapiToken                String?    @map("uazapi_token")
+  uazapiInstanceId           String?    @unique @map("uazapi_instance_id")
   quepasaToken               String?    @map("quepasa_token") // Token único gerado para cada sessão Quepasa
   interactiveCampaignEnabled Boolean    @default(false) @map("interactive_campaign_enabled") // Habilitar webhooks para campanhas interativas
   webhookSecret              String?    @map("webhook_secret") // Token único para validar webhooks
@@ -679,4 +683,10 @@ model WebhookSubscription {
 
   @@index([connectionId])
   @@map("webhook_subscriptions")
+}
+
+model UazapiWebhookReceipt {
+  id String @id
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("uazapi_webhook_receipts")
 }

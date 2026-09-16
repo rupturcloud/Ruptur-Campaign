@@ -1,3 +1,4 @@
+import { uazapiService, publicUazapiSession } from '../services/uazapiService';
 import { Router } from 'express';
 import { WahaSyncService } from '../services/wahaSyncService';
 import { WhatsAppSessionService } from '../services/whatsappSessionService';
@@ -66,6 +67,39 @@ const wahaRequest = async (endpoint: string, options: any = {}) => {
 
 const router = Router();
 
+// Handle Uazapi lifecycle before legacy provider fallbacks.
+router.use('/sessions/:sessionName', authMiddleware, async (req: AuthenticatedRequest, res: Response, next) => {
+  try {
+    const session = await prisma.whatsAppSession.findUnique({ where: { name: req.params.sessionName } });
+    if (session?.provider !== 'UAZAPI') return next();
+    if (!req.tenantId || session.tenantId !== req.tenantId) return res.status(404).json({ error: 'Conexão não encontrada nesta empresa' });
+    if (req.method === 'GET' && ['/', '/status', '/me', '/auth/qr'].includes(req.path)) {
+      const result = await uazapiService.refresh(session);
+      if (req.path === '/auth/qr') return res.json({ qr: result.qr, expiresAt: result.qrExpiresAt, status: result.status });
+      if (req.path === '/me') return res.json(result.me || {});
+      return res.json(result);
+    }
+    if (req.method === 'POST' && ['/start', '/restart'].includes(req.path)) {
+      // Reconnect without logging out an already paired phone.
+      return res.json(await uazapiService.refresh(session, true));
+    }
+    if (req.method === 'POST' && req.path === '/stop') {
+      await uazapiService.client(session).request('/instance/disconnect', 'POST', {});
+      const updated = await prisma.whatsAppSession.update({ where: { id: session.id }, data: { status: 'STOPPED', qr: null, qrExpiresAt: null, meId: null, meJid: null, mePushName: null } });
+      return res.json(publicUazapiSession(updated));
+    }
+    if (req.method === 'DELETE' && req.path === '/') {
+      if (session.interactiveCampaignEnabled) await uazapiService.configureWebhook(session, true);
+      await prisma.whatsAppSession.delete({ where: { id: session.id } });
+      return res.json({ success: true });
+    }
+    return res.status(400).json({ error: 'Operação não disponível para conexões Uazapi' });
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : 'Falha na conexão Uazapi' });
+  }
+});
+
+
 // Listar todas as sessões sincronizadas com WAHA API
 router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -74,6 +108,12 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
 
     // Sempre usar o tenantId do token (mesmo para SUPERADMIN quando tem empresa selecionada)
     const tenantId = req.tenantId;
+
+    const uazapiSessions = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI', ...(tenantId ? { tenantId } : {}) } });
+    await Promise.all(uazapiSessions.map(async session => {
+      try { await uazapiService.refresh(session); }
+      catch { await prisma.whatsAppSession.update({ where: { id: session.id }, data: { status: 'FAILED' } }); }
+    }));
 
     // Sincronizar apenas sessões WAHA que já existem no banco DESTE tenant
     // NÃO buscar sessões externas - sistema SaaS multi-tenant
@@ -401,8 +441,8 @@ router.post('/sessions', authMiddleware, checkConnectionQuota, async (req: Authe
       return res.status(400).json({ error: 'Nome da sessão é obrigatório' });
     }
 
-    if (!['WAHA', 'EVOLUTION', 'QUEPASA'].includes(provider)) {
-      return res.status(400).json({ error: 'Provedor deve ser WAHA, EVOLUTION ou QUEPASA' });
+    if (!['WAHA', 'EVOLUTION', 'QUEPASA', 'UAZAPI'].includes(provider)) {
+      return res.status(400).json({ error: 'Provedor deve ser WAHA, EVOLUTION, QUEPASA ou UAZAPI' });
     }
 
     // Usar tenantId do usuário autenticado (SUPERADMIN pode especificar tenant no body se necessário)
@@ -428,6 +468,15 @@ router.post('/sessions', authMiddleware, checkConnectionQuota, async (req: Authe
     if (existingSession) {
       console.log('⚠️ Sessão já existe:', realName);
       return res.status(409).json({ error: 'Já existe uma conexão com este nome' });
+    }
+
+    if (provider === 'UAZAPI') {
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenant?.active || !(tenant.allowedProviders || []).includes('UAZAPI') && !(tenant.allowedProviders || []).every((p: string) => ['WAHA', 'EVOLUTION', 'QUEPASA'].includes(p))) return res.status(403).json({ error: 'Uazapi não está habilitado para esta empresa' });
+      if (!/^[\p{L}\p{N} _-]{1,64}$/u.test(displayName)) return res.status(400).json({ error: 'Use um nome de até 64 letras, números, espaços, hífens ou sublinhados' });
+      if (typeof req.body.uazapiToken !== 'string' || !req.body.uazapiToken.trim()) return res.status(400).json({ error: 'Token da instância Uazapi obrigatório' });
+      return res.json(await uazapiService.create({ name: realName, displayName, tenantId,
+        host: req.body.uazapiHost, token: req.body.uazapiToken.trim(), interactiveCampaignEnabled }));
     }
 
     let result;
@@ -790,10 +839,10 @@ router.delete('/sessions/:sessionName', authMiddleware, async (req: Authenticate
     const tenantId = req.user?.role === 'SUPERADMIN' ? undefined : req.tenantId;
 
     // Verificar o provedor da sessão
-    let sessionProvider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' = 'WAHA';
+    let sessionProvider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI' = 'WAHA';
     try {
       const savedSession = await WhatsAppSessionService.getSession(sessionName, tenantId);
-      sessionProvider = (savedSession.provider as 'WAHA' | 'EVOLUTION' | 'QUEPASA') || 'WAHA';
+      sessionProvider = (savedSession.provider as 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI') || 'WAHA';
     } catch (error) {
       console.error('❌ Sessão não encontrada ou não pertence ao tenant:', error);
       return res.status(404).json({ error: 'Sessão não encontrada' });
@@ -909,7 +958,7 @@ router.get('/sessions/:sessionName/auth/qr', authMiddleware, async (req: Authent
     }
 
     // Verificar o provedor da sessão para rotear corretamente
-    let sessionProvider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' = 'WAHA'; // Default para WAHA (compatibilidade)
+    let sessionProvider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI' = 'WAHA'; // Default para WAHA (compatibilidade)
     let sessionData: any;
     try {
       sessionData = await WhatsAppSessionService.getSession(sessionName, tenantId);
@@ -917,7 +966,7 @@ router.get('/sessions/:sessionName/auth/qr', authMiddleware, async (req: Authent
         provider: sessionData.provider,
         status: sessionData.status
       });
-      sessionProvider = (sessionData.provider as 'WAHA' | 'EVOLUTION' | 'QUEPASA') || 'WAHA';
+      sessionProvider = (sessionData.provider as 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI') || 'WAHA';
     } catch (error) {
       console.log(`⚠️ Sessão ${sessionName} não encontrada no banco ou não pertence ao tenant, assumindo WAHA`);
       return res.status(404).json({ error: 'Sessão não encontrada' });

@@ -1,3 +1,4 @@
+import { uazapiService } from './uazapiService';
 /**
  * Interactive Campaign Flow Engine
  * Processa respostas de contatos e navega pelo fluxo da campanha
@@ -14,6 +15,7 @@ const prisma = new PrismaClient();
 interface ProcessMessageData {
   contactPhone: string;
   messageContent: string;
+  uazapiScope?: { tenantId: string; connectionId: string };
   sessionId?: string; // ID da sessão da conexão WhatsApp
 }
 
@@ -26,7 +28,7 @@ export const interactiveCampaignFlowEngine = {
       console.log(`📨 Processing incoming message from ${data.contactPhone}`);
 
       // Buscar sessão ativa do contato
-      const session = await interactiveCampaignSessionService.getActiveSessionByPhone(data.contactPhone);
+      const session = await interactiveCampaignSessionService.getActiveSessionByPhone(data.contactPhone, data.uazapiScope);
 
       if (!session) {
         console.log(`⚠️ No active session found for ${data.contactPhone}`);
@@ -380,7 +382,7 @@ export const interactiveCampaignFlowEngine = {
             // Converter para formato de Connection
             connection = {
               id: oldSession.id,
-              provider: (oldSession.provider || 'WAHA') as 'WAHA' | 'EVOLUTION' | 'QUEPASA',
+              provider: (oldSession.provider || 'WAHA') as 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI',
               instanceName: oldSession.name,
               phoneNumber: oldSession.meJid || oldSession.name,
               status: 'ACTIVE' as const,
@@ -397,6 +399,13 @@ export const interactiveCampaignFlowEngine = {
           console.log(`✅ Using connection from Connection table: ${connection.instanceName}`);
         }
       }
+    }
+
+    const uazapiConnectionId = session.variables?.uazapiConnectionId;
+    if (uazapiConnectionId) {
+      const source = await prisma.whatsAppSession.findFirst({ where: { id: uazapiConnectionId, tenantId: session.tenantId, provider: 'UAZAPI' } });
+      if (!source) throw new Error('Conexão Uazapi original indisponível');
+      connection = { id: source.id, provider: 'UAZAPI', instanceName: source.name, tenantId: source.tenantId } as any;
     }
 
     if (!connection) {
@@ -470,6 +479,10 @@ export const interactiveCampaignFlowEngine = {
     // Enviar baseado no provider
     try {
       switch (connection.provider) {
+        case 'UAZAPI':
+          await uazapiService.send(connection.instanceName, contactPhone, messagePayload, session.tenantId || undefined);
+          break;
+
         case 'WAHA':
           await sendMessage(connection.instanceName, contactPhone, messagePayload);
           break;

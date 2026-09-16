@@ -1,0 +1,176 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: campaign
+      POSTGRES_USER: campaign
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets:
+    - pg_password
+    networks:
+    - private
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+        - node.hostname == ruptur1
+      resources:
+        limits:
+          memory: 384M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        parallelism: 1
+        failure_action: rollback
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U campaign -d campaign
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  redis:
+    image: redis:7-alpine
+    command:
+    - redis-server
+    - --appendonly
+    - 'yes'
+    - --maxmemory
+    - 128mb
+    - --maxmemory-policy
+    - noeviction
+    networks:
+    - private
+    volumes:
+    - redis_data:/data
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+        - node.hostname == ruptur1
+      resources:
+        limits:
+          memory: 192M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        parallelism: 1
+        failure_action: rollback
+  backend:
+    image: ruptur-campaign-backend:b51cdb3-uazapi-contract-1
+    environment:
+      REDIS_URL: redis://redis:6379
+      REDIS_PREFIX: ruptur_campaign
+      PORT: '3001'
+      NODE_ENV: production
+      JWT_EXPIRES_IN: 24h
+      APP_URL: https://saas.ruptur.cloud
+      ALLOWED_ORIGINS: https://saas.ruptur.cloud
+      DEFAULT_COMPANY_NAME: Ruptur Campaign
+      DEFAULT_PAGE_TITLE: Ruptur Campaign
+    secrets:
+    - pg_password
+    - jwt_secret
+    - admin_password
+    networks:
+    - private
+    - network_public
+    volumes:
+    - contacts_data:/app/data
+    - uploads_data:/app/uploads
+    - backup_data:/app/backups
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+        - node.hostname == ruptur1
+      resources:
+        limits:
+          memory: 768M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        parallelism: 1
+        failure_action: rollback
+      labels:
+        traefik.enable: 'true'
+        traefik.docker.network: network_public
+        traefik.http.routers.ruptur-campaign-backend.rule: Host(`saas.ruptur.cloud`)
+          && (PathPrefix(`/api`) || PathPrefix(`/socket.io`))
+        traefik.http.routers.ruptur-campaign-backend.entrypoints: websecure
+        traefik.http.routers.ruptur-campaign-backend.tls.certresolver: letsencryptresolver
+        traefik.http.services.ruptur-campaign-backend.loadbalancer.server.port: '3001'
+    healthcheck:
+      test:
+      - CMD
+      - node
+      - -e
+      - fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+  frontend:
+    image: ruptur-campaign-frontend:b51cdb3-manual-leads-1
+    networks:
+    - private
+    - network_public
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+        - node.hostname == ruptur1
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        parallelism: 1
+        failure_action: rollback
+      labels:
+        traefik.enable: 'true'
+        traefik.docker.network: network_public
+        traefik.http.routers.ruptur-campaign-frontend.rule: Host(`saas.ruptur.cloud`)
+        traefik.http.routers.ruptur-campaign-frontend.entrypoints: websecure
+        traefik.http.routers.ruptur-campaign-frontend.tls.certresolver: letsencryptresolver
+        traefik.http.services.ruptur-campaign-frontend.loadbalancer.server.port: '80'
+networks:
+  private:
+    external: true
+    name: ruptur-campaign_private
+  network_public:
+    external: true
+volumes:
+  postgres_data:
+    external: true
+    name: ruptur-campaign_postgres_data
+  redis_data:
+    external: true
+    name: ruptur-campaign_redis_data
+  contacts_data:
+    external: true
+    name: ruptur-campaign_contacts_data
+  uploads_data:
+    external: true
+    name: ruptur-campaign_uploads_data
+  backup_data:
+    external: true
+    name: ruptur-campaign_backup_data
+secrets:
+  pg_password:
+    external: true
+    name: ruptur_campaign_pg_password
+  jwt_secret:
+    external: true
+    name: ruptur_campaign_jwt_secret
+  admin_password:
+    external: true
+    name: ruptur_campaign_admin_password
