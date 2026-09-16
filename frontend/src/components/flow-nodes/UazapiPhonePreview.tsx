@@ -22,7 +22,7 @@ export function UazapiPhonePreview({ composition, onReorderButtons }: { composit
   const media = ['image', 'video', 'videoplay', 'document', 'audio', 'myaudio', 'ptt', 'ptv', 'sticker'].includes(type);
 
   return <aside className="sticky top-3 rounded-[2rem] bg-slate-900 p-2 shadow-xl" aria-label="Prévia da mensagem no WhatsApp">
-    <div className="w-[272px] overflow-hidden rounded-[1.55rem] bg-[#e9edef]">
+    <div className="w-[272px] max-w-full overflow-hidden rounded-[1.55rem] bg-[#e9edef]">
       <div className="flex items-center gap-2 bg-[#075e54] px-4 py-3 text-white">
         <span className="grid h-8 w-8 place-items-center rounded-full bg-[#25d366] text-sm font-bold">R</span>
         <div><strong className="block text-xs">Ruptur Campaign</strong><span className="text-[10px] text-emerald-100">online</span></div>

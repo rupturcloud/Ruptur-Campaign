@@ -727,7 +727,7 @@ export function CampaignsPage() {
         }
       />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="px-6 py-4 border-b border-gray-200">
             <h3 className="text-lg font-medium text-gray-900">Campanhas Criadas</h3>
@@ -740,8 +740,8 @@ export function CampaignsPage() {
           ) : (
             <div className="divide-y divide-gray-200">
               {campaigns.map((campaign) => (
-                <div key={campaign.id} className="px-6 py-3 h-[60px] flex items-center">
-                  <div className="flex items-center justify-between w-full">
+                <div key={campaign.id} className="px-4 sm:px-6 py-3 flex items-center">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full">
                     {/* Nome e Status */}
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <h4 className="text-sm font-medium text-gray-900 truncate">{campaign.nome}</h4>
@@ -751,7 +751,7 @@ export function CampaignsPage() {
                     </div>
 
                     {/* Informações essenciais */}
-                    <div className="flex items-center gap-6 text-sm text-gray-600">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600">
                       <div className="flex items-center gap-1">
                         <span className="font-medium">Contatos:</span>
                         <span>{campaign.totalContacts}</span>
@@ -780,7 +780,7 @@ export function CampaignsPage() {
                     </div>
 
                     {/* Botões de ação */}
-                    <div className="flex gap-1 ml-4">
+                    <div className="flex gap-1 self-end sm:self-auto sm:ml-4">
                       <button
                         onClick={() => handleViewReport(campaign.id)}
                         className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
@@ -839,8 +839,8 @@ export function CampaignsPage() {
         {showCreateModal && (
           <Portal>
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 backdrop-blur-sm" style={{ zIndex: 9999 }}>
-            <div className="bg-white rounded-lg shadow-xl max-w-[1600px] w-full max-h-[95vh] overflow-y-auto">
-              <div className="flex justify-between items-center p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+            <div className="bg-white rounded-lg shadow-xl max-w-[1600px] w-full max-h-[95vh] overflow-x-hidden overflow-y-auto">
+              <div className="flex justify-between items-start gap-3 p-4 sm:p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
                 <div>
                   <h3 className="text-xl font-semibold text-gray-900">{editingCampaignId ? 'Editar Campanha' : 'Nova Campanha'}</h3>
                   <p className="text-sm text-gray-600 mt-1">Configure sua campanha de mensagens WhatsApp</p>
@@ -855,8 +855,8 @@ export function CampaignsPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleCreateCampaign} className="p-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[minmax(280px,.8fr)_minmax(420px,1.2fr)_296px] gap-8">
+              <form onSubmit={handleCreateCampaign} className="p-4 sm:p-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-[minmax(280px,.8fr)_minmax(420px,1.2fr)_296px] gap-5 sm:gap-8">
 
                   {/* COLUNA ESQUERDA - Informações Básicas */}
                   <div className="space-y-6">
@@ -1736,7 +1736,7 @@ export function CampaignsPage() {
 
                                     {item.content.useMediaVariations ? (
                                       // Grid horizontal de 4 variações
-                                      <div className="grid grid-cols-4 gap-3">
+                                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                         {Array.from({ length: 4 }, (_, varIndex) => {
                                           const mediaVariations = item.content.mediaVariations || [];
                                           const variation = mediaVariations[varIndex] || { url: '', caption: '', fileName: '' };

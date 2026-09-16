@@ -38,7 +38,7 @@ export function LoginPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden">
         <div className="flex flex-col lg:flex-row">
-          <div className="lg:w-1/2 p-12 flex items-center justify-center text-white" style={{ background: 'linear-gradient(135deg, #233e4f 0%, #1a2d3b 100%)' }}>
+          <div className="lg:w-1/2 p-6 sm:p-12 flex items-center justify-center text-white" style={{ background: 'linear-gradient(135deg, #233e4f 0%, #1a2d3b 100%)' }}>
             <div className="text-center">
               <div className="w-24 h-24 bg-white/20 rounded-2xl mx-auto mb-8 flex items-center justify-center backdrop-blur-sm">
                 {settings?.logoUrl || settings?.iconUrl ? (
@@ -56,7 +56,7 @@ export function LoginPage() {
                   />
                 )}
               </div>
-              <h1 className="text-4xl font-bold mb-4">
+              <h1 className="text-3xl sm:text-4xl font-bold mb-4">
                 {settings?.pageTitle || 'Astra Online'}
               </h1>
               <p className="text-xl text-gray-100 mb-8">
@@ -68,7 +68,7 @@ export function LoginPage() {
             </div>
           </div>
 
-          <div className="lg:w-1/2 p-12">
+          <div className="lg:w-1/2 p-6 sm:p-12">
             <div className="max-w-md mx-auto">
               <div className="text-center mb-8">
                 <h2 className="text-3xl font-bold text-gray-900 mb-2">Bem-vindo!</h2>
