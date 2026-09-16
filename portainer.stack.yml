@@ -69,8 +69,8 @@ services:
       PORT: '3001'
       NODE_ENV: production
       JWT_EXPIRES_IN: 24h
-      APP_URL: https://saas.ruptur.cloud
-      ALLOWED_ORIGINS: https://saas.ruptur.cloud
+      APP_URL: https://ruptur-campaign.ruptur.cloud
+      ALLOWED_ORIGINS: https://ruptur-campaign.ruptur.cloud
       DEFAULT_COMPANY_NAME: Ruptur Campaign
       DEFAULT_PAGE_TITLE: Ruptur Campaign
     secrets:
@@ -101,7 +101,7 @@ services:
       labels:
         traefik.enable: 'true'
         traefik.docker.network: network_public
-        traefik.http.routers.ruptur-campaign-backend.rule: Host(`saas.ruptur.cloud`)
+        traefik.http.routers.ruptur-campaign-backend.rule: Host(`ruptur-campaign.ruptur.cloud`)
           && (PathPrefix(`/api`) || PathPrefix(`/socket.io`))
         traefik.http.routers.ruptur-campaign-backend.entrypoints: websecure
         traefik.http.routers.ruptur-campaign-backend.tls.certresolver: letsencryptresolver
@@ -138,7 +138,7 @@ services:
       labels:
         traefik.enable: 'true'
         traefik.docker.network: network_public
-        traefik.http.routers.ruptur-campaign-frontend.rule: Host(`saas.ruptur.cloud`)
+        traefik.http.routers.ruptur-campaign-frontend.rule: Host(`ruptur-campaign.ruptur.cloud`)
         traefik.http.routers.ruptur-campaign-frontend.entrypoints: websecure
         traefik.http.routers.ruptur-campaign-frontend.tls.certresolver: letsencryptresolver
         traefik.http.services.ruptur-campaign-frontend.loadbalancer.server.port: '80'
