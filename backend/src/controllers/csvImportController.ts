@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import multer from 'multer';
 import * as path from 'path';
 import { CSVImportService } from '../services/csvImportService';
+import { CategoryService } from '../services/categoryService';
 import { ApiError } from '../types';
 
 // Configurar multer para upload de arquivos
@@ -53,9 +54,42 @@ export class CSVImportController {
         return res.status(403).json(apiError);
       }
 
-      console.log('📤 Upload recebido:', req.file.originalname, req.file.filename, 'tenantId:', tenantId);
+      const rawCategoriaId = typeof req.body?.categoriaId === 'string' ? req.body.categoriaId.trim() : '';
+      const newCategoryName = typeof req.body?.newCategoryName === 'string' ? req.body.newCategoryName.trim() : '';
+      const newCategoryColor = typeof req.body?.newCategoryColor === 'string' && req.body.newCategoryColor.trim()
+        ? req.body.newCategoryColor.trim()
+        : '#1e3a5f';
+      const newCategoryDescription = typeof req.body?.newCategoryDescription === 'string' && req.body.newCategoryDescription.trim()
+        ? req.body.newCategoryDescription.trim()
+        : undefined;
 
-      const result = await CSVImportService.importContacts(req.file.path, tenantId);
+      let effectiveCategoriaId: string | undefined = rawCategoriaId || undefined;
+      let createdCategory: any = null;
+
+      if (!effectiveCategoriaId && newCategoryName) {
+        createdCategory = await CategoryService.createCategory(
+          {
+            nome: newCategoryName,
+            cor: newCategoryColor,
+            descricao: newCategoryDescription,
+          },
+          tenantId
+        );
+        effectiveCategoriaId = createdCategory.id;
+        console.log('📂 Nova categoria criada durante importação CSV:', createdCategory.id, createdCategory.nome);
+      }
+
+      console.log(
+        '📤 Upload recebido:',
+        req.file.originalname,
+        req.file.filename,
+        'tenantId:',
+        tenantId,
+        'categoriaId:',
+        effectiveCategoriaId || '(nenhuma)'
+      );
+
+      const result = await CSVImportService.importContacts(req.file.path, tenantId, effectiveCategoriaId);
 
       if (result.success) {
         res.json({

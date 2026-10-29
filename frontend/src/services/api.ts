@@ -133,9 +133,29 @@ class ApiService {
   }
 
   // CSV Import methods
-  async importCSV(file: File): Promise<ImportResult> {
+  async importCSV(
+    file: File,
+    options?: {
+      categoriaId?: string;
+      newCategoryName?: string;
+      newCategoryColor?: string;
+      newCategoryDescription?: string;
+    }
+  ): Promise<ImportResult> {
     const formData = new FormData();
     formData.append('csv', file);
+    if (options?.categoriaId) {
+      formData.append('categoriaId', options.categoriaId);
+    }
+    if (options?.newCategoryName) {
+      formData.append('newCategoryName', options.newCategoryName);
+    }
+    if (options?.newCategoryColor) {
+      formData.append('newCategoryColor', options.newCategoryColor);
+    }
+    if (options?.newCategoryDescription) {
+      formData.append('newCategoryDescription', options.newCategoryDescription);
+    }
 
     const token = localStorage.getItem('auth_token');
     const headers: HeadersInit = {};

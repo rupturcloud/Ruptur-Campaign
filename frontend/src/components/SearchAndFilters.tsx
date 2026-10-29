@@ -23,18 +23,30 @@ export function SearchAndFilters({
 }: SearchAndFiltersProps) {
   const [categories, setCategories] = useState<Category[]>([]);
 
-  useEffect(() => {
-    loadCategories();
-  }, []);
-
   const loadCategories = async () => {
     try {
-      const response = await apiService.getCategories();
+      const allCategories = await apiService.getAllCategories();
+      if (Array.isArray(allCategories)) {
+        setCategories(allCategories);
+        return;
+      }
+      const response = await apiService.getCategories({ pageSize: 100 });
       setCategories(response.categories || []);
     } catch (error) {
       console.error('Erro ao carregar categorias:', error);
     }
   };
+
+  useEffect(() => {
+    loadCategories();
+    const handleCategoriesUpdated = () => {
+      loadCategories();
+    };
+    window.addEventListener('categories-updated', handleCategoriesUpdated);
+    return () => {
+      window.removeEventListener('categories-updated', handleCategoriesUpdated);
+    };
+  }, []);
 
   return (
     <div className="space-y-4 mb-6">

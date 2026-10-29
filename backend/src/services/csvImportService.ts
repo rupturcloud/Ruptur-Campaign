@@ -52,7 +52,7 @@ export class CSVImportService {
     return { allowed: true, remaining };
   }
 
-  static async importContacts(filePath: string, tenantId: string): Promise<ImportResult> {
+  static async importContacts(filePath: string, tenantId: string, defaultCategoriaId?: string): Promise<ImportResult> {
     const results: CSVRow[] = [];
     const errors: string[] = [];
     let successfulImports = 0;
@@ -107,15 +107,18 @@ export class CSVImportService {
                 continue;
               }
 
-              // Preparar dados do contato incluindo tenantId
+              // Preparar dados do contato incluindo tenantId e categoria selecionada/criada
               const tags = row.tags ? row.tags.split(',').map((tag: string) => tag.trim()) : [];
+              const resolvedCategoriaId = (defaultCategoriaId && defaultCategoriaId.trim())
+                ? defaultCategoriaId.trim()
+                : (row.categoriaid?.trim() || undefined);
               const contactData: ContactInput = {
                 nome: row.nome.trim(),
                 telefone: row.telefone.trim(),
                 email: row.email?.trim() || undefined,
                 observacoes: row.observacoes?.trim() || undefined,
                 tags: tags,
-                categoriaId: row.categoriaid?.trim() || undefined,
+                categoriaId: resolvedCategoriaId,
                 tenantId: tenantId
               };
 
