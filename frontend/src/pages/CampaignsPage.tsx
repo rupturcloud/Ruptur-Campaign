@@ -79,33 +79,42 @@ function formatSessionPhone(session?: Partial<WhatsAppSession> | null, fallbackN
 
 function CircularProgress({
   percent,
-  size = 38,
-  strokeWidth = 3.5,
+  failedPercent = 0,
+  size = 42,
+  strokeWidth = 4,
   status = 'PENDING'
 }: {
   percent: number;
+  failedPercent?: number;
   size?: number;
   strokeWidth?: number;
   status?: string;
 }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, percent)) / 100) * circumference;
+
+  // Comprimentos dos arcos para enviados e falhas
+  const validPercent = Math.min(100, Math.max(0, percent));
+  const validFailedPercent = Math.min(100 - validPercent, Math.max(0, failedPercent));
+
+  const strokeDashoffsetSent = circumference - (validPercent / 100) * circumference;
+  const strokeDashoffsetFailed = circumference - (validFailedPercent / 100) * circumference;
 
   const colorClass =
     status === 'COMPLETED'
       ? 'text-emerald-500'
       : status === 'RUNNING'
-      ? 'text-blue-500'
+      ? 'text-blue-600'
       : status === 'PAUSED'
       ? 'text-amber-500'
       : status === 'FAILED'
       ? 'text-red-500'
-      : 'text-purple-500';
+      : 'text-indigo-500';
 
   return (
     <div className="relative inline-flex items-center justify-center flex-shrink-0" style={{ width: size, height: size }}>
       <svg className="w-full h-full transform -rotate-90" viewBox={`0 0 ${size} ${size}`}>
+        {/* Fundo do círculo */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -115,21 +124,43 @@ function CircularProgress({
           className="text-gray-200"
           fill="transparent"
         />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke="currentColor"
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-          className={`${colorClass} transition-all duration-500 ease-out`}
-          fill="transparent"
-        />
+        {/* Arco de enviados (verde / azul / status) */}
+        {validPercent > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffsetSent}
+            strokeLinecap="round"
+            className={`${colorClass} transition-all duration-500 ease-out`}
+            fill="transparent"
+          />
+        )}
+        {/* Arco de falhas (vermelho), posicionado após os enviados */}
+        {validFailedPercent > 0 && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffsetFailed}
+            strokeLinecap="round"
+            style={{
+              transformOrigin: 'center',
+              transform: `rotate(${(validPercent / 100) * 360}deg)`
+            }}
+            className="text-red-500 transition-all duration-500 ease-out"
+            fill="transparent"
+          />
+        )}
       </svg>
-      <span className="absolute text-[10px] font-bold text-gray-700 tracking-tighter">
-        {percent}%
+      <span className="absolute text-[10px] font-bold text-gray-800 tracking-tighter">
+        {validPercent}%
       </span>
     </div>
   );
@@ -965,11 +996,22 @@ export function CampaignsPage() {
     );
   }
 
+  // Totais agregados de todas as campanhas em tempo real
+  const totalCampaignsCount = campaigns.length;
+  const totalContactsCount = campaigns.reduce((acc, c) => acc + (c.totalContacts || 0), 0);
+  const totalSentCount = campaigns.reduce((acc, c) => acc + (c.sentCount || 0), 0);
+  const totalFailedCount = campaigns.reduce((acc, c) => acc + (c.failedCount || 0), 0);
+  const totalProcessedCount = totalSentCount + totalFailedCount;
+  const totalRemainingCount = Math.max(0, totalContactsCount - totalProcessedCount);
+  const totalOverallPercent = totalContactsCount > 0 ? Math.round((totalSentCount / totalContactsCount) * 100) : 0;
+  const totalProcessedPercent = totalContactsCount > 0 ? Math.round((totalProcessedCount / totalContactsCount) * 100) : 0;
+  const runningCampaignsCount = campaigns.filter(c => c.status === 'RUNNING').length;
+
   return (
     <>
       <Header
         title="Campanhas"
-        subtitle={`${campaigns.length} campanhas ativas`}
+        subtitle={`${totalCampaignsCount} campanha(s) · ${totalProcessedCount.toLocaleString('pt-BR')}/${totalContactsCount.toLocaleString('pt-BR')} processadas (${totalSentCount.toLocaleString('pt-BR')} enviadas, ${totalFailedCount.toLocaleString('pt-BR')} falhas · ${totalRemainingCount.toLocaleString('pt-BR')} restantes)`}
         actions={
           <button
             onClick={() => { setEditingCampaignId(null); resetForm(); setShowCreateModal(true); }}
@@ -981,10 +1023,92 @@ export function CampaignsPage() {
       />
 
       <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+        {/* Cards de Resumo dos Totais em Tempo Real */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total de Campanhas</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{totalCampaignsCount}</p>
+              {runningCampaignsCount > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[11px] text-blue-600 font-semibold mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                  {runningCampaignsCount} em execução
+                </span>
+              ) : (
+                <span className="text-[11px] text-gray-400">todas pausadas/concluídas</span>
+              )}
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+              </svg>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total de Contatos</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{totalContactsCount.toLocaleString('pt-BR')}</p>
+              <span className="text-[11px] text-gray-500 font-medium">
+                {totalRemainingCount > 0 ? `${totalRemainingCount.toLocaleString('pt-BR')} pendentes` : 'Todos processados'}
+              </span>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Enviadas</p>
+              <p className="text-xl sm:text-2xl font-bold text-emerald-600 mt-1">
+                {totalSentCount.toLocaleString('pt-BR')}
+                <span className="text-xs font-normal text-gray-500 ml-1.5">({totalOverallPercent}%)</span>
+              </p>
+              <div className="w-28 bg-gray-100 rounded-full h-1.5 mt-1 overflow-hidden flex">
+                <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${totalOverallPercent}%` }}></div>
+                {totalFailedCount > 0 && (
+                  <div className="bg-red-500 h-full transition-all duration-500" style={{ width: `${Math.min(100 - totalOverallPercent, Math.round((totalFailedCount / (totalContactsCount || 1)) * 100))}%` }}></div>
+                )}
+              </div>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Processadas</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">
+                {totalProcessedCount.toLocaleString('pt-BR')}
+                <span className="text-xs font-normal text-gray-500 ml-1.5">/ {totalContactsCount.toLocaleString('pt-BR')}</span>
+              </p>
+              <div className="flex items-center gap-2 mt-0.5 text-[11px]">
+                <span className="text-emerald-600 font-semibold">{totalSentCount.toLocaleString('pt-BR')} env.</span>
+                <span className="text-gray-300">·</span>
+                <span className={`${totalFailedCount > 0 ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>{totalFailedCount.toLocaleString('pt-BR')} falhas</span>
+              </div>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="px-6 py-3.5 border-b border-gray-200 flex items-center justify-between">
+          <div className="px-6 py-3.5 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2.5">
               <h3 className="text-base font-semibold text-gray-900">Campanhas Criadas</h3>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                Total: {totalCampaignsCount}
+              </span>
               {campaigns.some(c => c.status === 'RUNNING') && (
                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
                   <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
@@ -1015,7 +1139,11 @@ export function CampaignsPage() {
                 const total = campaign.totalContacts || 0;
                 const sent = campaign.sentCount || 0;
                 const failed = campaign.failedCount || 0;
-                const percent = total > 0 ? Math.round((sent / total) * 100) : 0;
+                const processed = sent + failed;
+                const remaining = Math.max(0, total - processed);
+                const percentSent = total > 0 ? Math.round((sent / total) * 100) : 0;
+                const percentFailed = total > 0 ? Math.round((failed / total) * 100) : 0;
+                const percentProcessed = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
                 const instancesCount = (campaign.sessionNames && campaign.sessionNames.length > 0)
                   ? campaign.sessionNames.length
                   : campaign.sessionName ? 1 : 0;
@@ -1034,9 +1162,15 @@ export function CampaignsPage() {
                 <div key={campaign.id} className="px-4 sm:px-6 py-3.5 hover:bg-gray-50/70 transition-colors">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full">
                     {/* Nome, Status e Instâncias Resumidas */}
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {/* Mini Pizza / Donut de Progresso */}
-                      <CircularProgress percent={percent} status={campaign.status} size={40} strokeWidth={4} />
+                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                      {/* Mini Pizza / Donut de Progresso com Enviados e Falhas */}
+                      <CircularProgress
+                        percent={percentSent}
+                        failedPercent={percentFailed}
+                        status={campaign.status}
+                        size={44}
+                        strokeWidth={4.5}
+                      />
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -1050,7 +1184,7 @@ export function CampaignsPage() {
                             {getStatusText(campaign.status)}
                           </span>
 
-                          {/* Badge resumido de instâncias: limpo e direto */}
+                          {/* Badge resumido de instâncias */}
                           {instancesCount > 0 ? (
                             <span
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help"
@@ -1064,37 +1198,58 @@ export function CampaignsPage() {
                           )}
                         </div>
 
-                        {/* Barra de Progresso Horizontal em Tempo Real */}
-                        <div className="mt-2 flex items-center gap-3 max-w-md">
-                          <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden border border-gray-200">
-                            <div className="h-full flex">
-                              <div
-                                style={{ width: `${percent}%` }}
-                                className={`transition-all duration-500 ${
-                                  campaign.status === 'COMPLETED'
-                                    ? 'bg-emerald-500'
-                                    : campaign.status === 'RUNNING'
-                                    ? 'bg-blue-600'
-                                    : campaign.status === 'PAUSED'
-                                    ? 'bg-amber-500'
-                                    : 'bg-indigo-500'
-                                }`}
-                              />
-                              {failed > 0 && total > 0 && (
+                        {/* Barra de Progresso Horizontal Bicolor em Tempo Real */}
+                        <div className="mt-2 space-y-1 max-w-xl">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden border border-gray-200">
+                              <div className="h-full flex">
                                 <div
-                                  style={{ width: `${Math.min(100 - percent, Math.round((failed / total) * 100))}%` }}
-                                  className="bg-red-500 transition-all duration-500"
-                                  title={`${failed} falhas`}
+                                  style={{ width: `${percentSent}%` }}
+                                  className={`transition-all duration-500 ${
+                                    campaign.status === 'COMPLETED'
+                                      ? 'bg-emerald-500'
+                                      : campaign.status === 'RUNNING'
+                                      ? 'bg-blue-600'
+                                      : campaign.status === 'PAUSED'
+                                      ? 'bg-amber-500'
+                                      : 'bg-indigo-500'
+                                  }`}
+                                  title={`${sent} enviados com sucesso`}
                                 />
-                              )}
+                                {failed > 0 && total > 0 && (
+                                  <div
+                                    style={{ width: `${Math.min(100 - percentSent, percentFailed)}%` }}
+                                    className="bg-red-500 transition-all duration-500"
+                                    title={`${failed} falhas`}
+                                  />
+                                )}
+                              </div>
                             </div>
+                            <span className="text-xs font-bold text-gray-700 whitespace-nowrap">
+                              {percentProcessed}%
+                            </span>
                           </div>
-                          <div className="text-[11px] font-medium text-gray-600 whitespace-nowrap flex items-center gap-1.5">
-                            <span className="text-gray-900 font-bold">{sent}</span>
-                            <span className="text-gray-400">/</span>
-                            <span>{total} contatos</span>
-                            {failed > 0 && (
-                              <span className="text-red-600 font-semibold text-[10px]">({failed} falhas)</span>
+
+                          {/* Discriminativo Total: Processadas (Enviadas + Falhas) / Total de Contatos */}
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
+                            <span className="font-semibold text-gray-900">
+                              Total: {processed.toLocaleString('pt-BR')} / {total.toLocaleString('pt-BR')}
+                            </span>
+                            <span className="text-gray-300 hidden sm:inline">|</span>
+                            <span className="text-emerald-700 font-medium">
+                              ✅ {sent.toLocaleString('pt-BR')} enviadas
+                            </span>
+                            <span className="text-gray-300 hidden sm:inline">|</span>
+                            <span className={failed > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>
+                              ❌ {failed.toLocaleString('pt-BR')} falhas
+                            </span>
+                            {remaining > 0 && (
+                              <>
+                                <span className="text-gray-300 hidden sm:inline">|</span>
+                                <span className="text-blue-700 font-medium">
+                                  ⏳ {remaining.toLocaleString('pt-BR')} pendentes
+                                </span>
+                              </>
                             )}
                           </div>
                         </div>
