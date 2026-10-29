@@ -49,6 +49,12 @@
       },
       "async": {
         "type": "boolean"
+      },
+      "headerText": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
       }
     },
     "required": [
@@ -120,6 +126,12 @@
       },
       "viewOnce": {
         "type": "boolean"
+      },
+      "headerText": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
       }
     },
     "required": [
@@ -312,6 +324,9 @@
       "text": {
         "type": "string"
       },
+      "headerText": {
+        "type": "string"
+      },
       "footerText": {
         "type": "string"
       },
@@ -353,6 +368,9 @@
       },
       "async": {
         "type": "boolean"
+      },
+      "title": {
+        "type": "string"
       }
     },
     "required": [

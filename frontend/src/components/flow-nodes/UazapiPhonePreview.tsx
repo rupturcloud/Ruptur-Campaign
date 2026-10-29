@@ -33,7 +33,12 @@ export function UazapiPhonePreview({ composition, onReorderButtons }: { composit
           {media && <div className="grid h-28 place-items-center bg-slate-300 text-3xl">{type === 'document' ? '📄' : type.includes('audio') || type === 'ptt' ? '▶︎' : '▧'}</div>}
           {type === 'location' && <div className="grid h-24 place-items-center bg-emerald-100 text-3xl">📍</div>}
           {type === 'contact' && <div className="border-b bg-white p-3 text-sm">👤 <strong>{c.fullName || 'Contato'}</strong><br /><span className="text-xs text-slate-500">{c.phoneNumber || 'Telefone'}</span></div>}
-          <div className="p-2.5 text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">{text}</div>
+          {c.imageButton && <div className="border-b bg-slate-200 overflow-hidden"><img src={c.imageButton} alt="Cabeçalho" className="max-h-36 w-full object-cover" onError={(e: any) => { e.target.style.display = 'none'; }} /></div>}
+          <div className="p-2.5 text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">
+            {(c.headerText || c.title) && <strong className="block mb-1 font-bold text-slate-900">{c.headerText || c.title}</strong>}
+            {text}
+            {c.footerText && <span className="block mt-1 text-[10px] text-slate-500 italic">{c.footerText}</span>}
+          </div>
           {type === 'status' && <div className="mx-2 mb-2 rounded bg-slate-800 px-3 py-5 text-center text-xs text-white">Status · {c.statusType || 'texto'}</div>}
           {type === 'location_button' && <button type="button" disabled className="w-full border-t py-2 text-xs font-medium text-[#00a884]">⌖ Enviar localização</button>}
           {type === 'pix_button' && <button type="button" disabled className="w-full border-t py-2 text-xs font-medium text-[#00a884]">PIX · {c.pixKey || 'Chave PIX'}</button>}

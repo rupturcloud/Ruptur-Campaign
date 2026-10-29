@@ -36,9 +36,26 @@ export function buildUazapiComposition(number: string, composition: any) {
     if (!button?.text?.trim() || !button?.value?.trim()) throw new Error('Todo botão precisa de texto e destino');
     return `${button.text.trim()}|${button.value.trim()}`;
   }) : undefined;
+  // Header handling for buttons, text and media
+  let formattedText = fields.text;
+  const header = fields.headerText || fields.title;
+  if (header && typeof header === 'string' && header.trim()) {
+    const cleanHeader = header.trim();
+    if (endpoint === '/send/menu') {
+      fields.headerText = cleanHeader;
+      fields.title = fields.title || cleanHeader;
+    } else if (endpoint === '/send/text' || endpoint === '/send/media') {
+      fields.headerText = cleanHeader;
+      fields.title = cleanHeader;
+      if (typeof formattedText === 'string' && !formattedText.startsWith(`*${cleanHeader}*`)) {
+        formattedText = formattedText.trim() ? `*${cleanHeader}*\n\n${formattedText}` : `*${cleanHeader}*`;
+      }
+    }
+  }
+
   const payload: any = endpoint === '/send/status'
     ? { ...fields, type: statusType || mediaType || 'text', recipients: [number] }
-    : { ...fields, number, async: false, track_source: 'ruptur-campaign',
+    : { ...fields, text: formattedText, number, async: false, track_source: 'ruptur-campaign',
         ...(['/send/menu', '/send/media'].includes(endpoint) ? { type } : {}),
         ...(structuredChoices ? { choices: structuredChoices } : {}) };
   validate(payload, (schemas as any)[endpoint], 'mensagem');

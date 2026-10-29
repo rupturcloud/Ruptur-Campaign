@@ -61,6 +61,7 @@ export function WhatsAppConnectionsPage() {
   const { selectedTenantId, loading: tenantLoading } = useTenant();
   const [sessions, setSessions] = useState<WhatsAppSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncingUazapi, setSyncingUazapi] = useState(false);
   const [uazapiToken, setUazapiToken] = useState('');
   const [uazapiHost, setUazapiHost] = useState('');
   const [newSessionName, setNewSessionName] = useState('');
@@ -243,6 +244,31 @@ export function WhatsAppConnectionsPage() {
         toast.error('Erro ao carregar sessões WhatsApp');
         setLoading(false);
       }
+    }
+  };
+
+
+  const syncUazapiInstances = async () => {
+    try {
+      setSyncingUazapi(true);
+      const response = await authenticatedFetch('/api/waha/sessions/uazapi/sync', {
+        method: 'POST',
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erro ao sincronizar');
+      const { imported, updated, skipped } = data;
+      if (imported > 0) {
+        toast.success(`✅ ${imported} instância(s) importada(s) da Uazapi`);
+      } else if (updated > 0) {
+        toast.success(`🔄 ${updated} instância(s) atualizada(s)`);
+      } else {
+        toast(`Nenhuma instância nova encontrada (${skipped} ignoradas)`);
+      }
+      await loadSessions(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao sincronizar Uazapi');
+    } finally {
+      setSyncingUazapi(false);
     }
   };
 
@@ -550,6 +576,15 @@ export function WhatsAppConnectionsPage() {
             >
               Atualizar
             </button>
+            {sessions.some(s => s.provider === 'UAZAPI') && (
+              <button
+                onClick={syncUazapiInstances}
+                disabled={syncingUazapi}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {syncingUazapi ? '⏳ Sincronizando...' : '🔄 Sincronizar Uazapi'}
+              </button>
+            )}
           </div>
         }
       />
