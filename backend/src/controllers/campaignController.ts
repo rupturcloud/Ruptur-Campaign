@@ -24,13 +24,21 @@ function parseManualPhones(value: unknown): string[] {
 // Validation rules
 export const campaignValidation = [
   body('nome').notEmpty().withMessage('Nome da campanha é obrigatório'),
-  body('targetTags').isArray().withMessage('Categorias dos contatos devem ser um array'),
-  body('sessionNames').isArray({ min: 1 }).withMessage('Pelo menos uma sessão WhatsApp deve ser selecionada'),
-  body('messageType').isIn(['text', 'image', 'video', 'audio', 'document', 'uazapi', 'sequence', 'openai', 'groq', 'wait']).withMessage('Tipo de mensagem inválido'),
-  body('messageContent').notEmpty().withMessage('Conteúdo da mensagem é obrigatório'),
-  body('randomDelay').isInt({ min: 0 }).withMessage('Delay deve ser um número positivo'),
-  body('startImmediately').isBoolean().withMessage('StartImmediately deve ser boolean'),
-  body('scheduledFor').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Data de agendamento deve ser válida')
+  body('targetTags').optional().isArray().withMessage('Categorias dos contatos devem ser um array'),
+  body('sessionNames').custom((val, { req }) => {
+    if (req.body?.status === 'DRAFT' || req.body?.sendMode === 'draft') return true;
+    return Array.isArray(val) && val.length >= 1;
+  }).withMessage('Pelo menos uma sessão WhatsApp deve ser selecionada'),
+  body('messageType').optional().isIn(['text', 'image', 'video', 'audio', 'document', 'uazapi', 'sequence', 'openai', 'groq', 'wait']).withMessage('Tipo de mensagem inválido'),
+  body('messageContent').custom((val, { req }) => {
+    if (req.body?.status === 'DRAFT' || req.body?.sendMode === 'draft') return true;
+    return Boolean(val);
+  }).withMessage('Conteúdo da mensagem é obrigatório'),
+  body('randomDelay').optional().isInt({ min: 0 }).withMessage('Delay deve ser um número positivo'),
+  body('startImmediately').optional().isBoolean().withMessage('StartImmediately deve ser boolean'),
+  body('scheduledFor').optional({ nullable: true, checkFalsy: true }).isISO8601().withMessage('Data de agendamento deve ser válida'),
+  body('status').optional().isIn(['DRAFT', 'PENDING', 'RUNNING', 'PAUSED', 'COMPLETED', 'FAILED']).withMessage('Status inválido'),
+  body('sendMode').optional().isIn(['immediate', 'scheduled', 'draft']).withMessage('Modo de envio inválido')
 ];
 
 // List all campaigns
@@ -170,47 +178,56 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
       messageContent,
       randomDelay,
       startImmediately,
-      scheduledFor
+      scheduledFor,
+      status,
+      sendMode
     } = req.body;
+
+    const isDraft = status === 'DRAFT' || sendMode === 'draft';
+    const willStartImmediately = !isDraft && (startImmediately === true || sendMode === 'immediate');
+    const finalStatus = isDraft ? 'DRAFT' : (willStartImmediately ? 'RUNNING' : 'PENDING');
+    const finalScheduledFor = (!isDraft && !willStartImmediately && scheduledFor) ? new Date(scheduledFor) : null;
 
     // Log detalhado da criação de campanha
     console.log(`🔍 === CRIANDO CAMPANHA ===`);
     console.log(`📝 Nome: ${nome}`);
-    console.log(`⏰ startImmediately: ${startImmediately} (tipo: ${typeof startImmediately})`);
+    console.log(`⏰ startImmediately: ${willStartImmediately} (tipo: ${typeof willStartImmediately})`);
     console.log(`📅 scheduledFor (recebido): ${scheduledFor}`);
-    if (scheduledFor) {
-      const scheduledDate = new Date(scheduledFor);
-      console.log(`📅 scheduledFor (convertido): ${scheduledDate.toISOString()}`);
+    if (finalScheduledFor) {
+      console.log(`📅 scheduledFor (convertido): ${finalScheduledFor.toISOString()}`);
       console.log(`🕐 Data/hora atual (UTC): ${new Date().toISOString()}`);
-      console.log(`⏱️  Diferença: ${scheduledDate.getTime() - Date.now()}ms (${Math.round((scheduledDate.getTime() - Date.now()) / 1000 / 60)} minutos)`);
+      console.log(`⏱️  Diferença: ${finalScheduledFor.getTime() - Date.now()}ms (${Math.round((finalScheduledFor.getTime() - Date.now()) / 1000 / 60)} minutos)`);
     }
-    console.log(`✅ Status será: ${startImmediately ? 'RUNNING' : 'PENDING'}`);
+    console.log(`✅ Status será: ${finalStatus}`);
     console.log(`🔍 =========================`);
 
-    // Verificar se todas as sessões existem e estão ativas (com tenant isolation)
-    const sessionWhere: any = {
-      name: { in: sessionNames },
-      status: 'WORKING'
-    };
+    // Para rascunhos (DRAFT): pular validação de sessões ativas e contatos obrigatórios
+    if (!isDraft) {
+      // Verificar se todas as sessões existem e estão ativas (com tenant isolation)
+      const sessionWhere: any = {
+        name: { in: sessionNames },
+        status: 'WORKING'
+      };
 
-    if (req.user?.role !== 'SUPERADMIN') {
-      sessionWhere.tenantId = req.tenantId;
-    }
+      if (req.user?.role !== 'SUPERADMIN') {
+        sessionWhere.tenantId = req.tenantId;
+      }
 
-    const sessions = await prisma.whatsAppSession.findMany({
-      where: sessionWhere
-    });
-
-    if (sessions.length === 0) {
-      return res.status(400).json({ error: 'Nenhuma sessão WhatsApp ativa encontrada nas selecionadas' });
-    }
-
-    if (sessions.length < sessionNames.length) {
-      const activeSessions = sessions.map(s => s.name);
-      const inactiveSessions = sessionNames.filter((name: string) => !activeSessions.includes(name));
-      return res.status(400).json({
-        error: `As seguintes sessões não estão ativas: ${inactiveSessions.join(', ')}`
+      const sessions = await prisma.whatsAppSession.findMany({
+        where: sessionWhere
       });
+
+      if (sessions.length === 0) {
+        return res.status(400).json({ error: 'Nenhuma sessão WhatsApp ativa encontrada nas selecionadas' });
+      }
+
+      if (sessions.length < sessionNames.length) {
+        const activeSessions = sessions.map(s => s.name);
+        const inactiveSessions = sessionNames.filter((name: string) => !activeSessions.includes(name));
+        return res.status(400).json({
+          error: `As seguintes sessões não estão ativas: ${inactiveSessions.join(', ')}`
+        });
+      }
     }
 
     let parsedManualPhones: string[];
@@ -220,80 +237,81 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
       return res.status(400).json({ error: error instanceof Error ? error.message : 'Números manuais inválidos' });
     }
 
-    if (targetTags.length === 0 && parsedManualPhones.length === 0) {
+    if (!isDraft && targetTags.length === 0 && parsedManualPhones.length === 0) {
       return res.status(400).json({ error: 'Selecione categorias ou informe pelo menos um número manual' });
     }
 
     // Buscar contatos usando ContactService com tenant isolation
     const tenantId = req.tenantId;
+    let campaignContacts: Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }> = [];
 
-    // Buscar contatos que pertencem às categorias selecionadas
-    const whereContacts: any = {
-      categoriaId: { in: targetTags },
-      tenantId: tenantId
-    };
+    if (!isDraft || (targetTags && targetTags.length > 0) || (parsedManualPhones && parsedManualPhones.length > 0)) {
+      // Buscar contatos que pertencem às categorias selecionadas
+      const whereContacts: any = {
+        categoriaId: { in: targetTags },
+        tenantId: tenantId
+      };
 
-    const filteredContacts = await prisma.contact.findMany({
-      where: targetTags.length > 0 ? whereContacts : { id: '__none__' },
-      select: {
-        id: true,
-        nome: true,
-        telefone: true,
-        categoriaId: true
+      const filteredContacts = await prisma.contact.findMany({
+        where: targetTags && targetTags.length > 0 ? whereContacts : { id: '__none__' },
+        select: {
+          id: true,
+          nome: true,
+          telefone: true,
+          categoriaId: true
+        }
+      });
+
+      console.log(`📊 Categorias selecionadas:`, targetTags);
+      const manualContacts = [] as Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }>;
+      for (const phone of parsedManualPhones || []) {
+        const existing = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
+        manualContacts.push(existing ? existing : { id: null, nome: `Lead ${phone}`, telefone: phone, categoriaId: null });
       }
-    });
+      const contactsByPhone = new Map<string, any>();
+      [...filteredContacts, ...manualContacts].forEach(contact => contactsByPhone.set(contact.telefone, contact));
+      campaignContacts = [...contactsByPhone.values()];
+      console.log(`📊 Contatos encontrados com categorias:`, filteredContacts.length, '· manuais:', manualContacts.length);
 
-    console.log(`📊 Categorias selecionadas:`, targetTags);
-    const manualContacts = [] as Array<{ id: string; nome: string; telefone: string; categoriaId: string | null }>;
-    for (const phone of parsedManualPhones) {
-      const existing = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
-      manualContacts.push(existing || await prisma.contact.create({ data: {
-        nome: `Lead manual ${phone}`, telefone: phone, tenantId, tags: []
-      }, select: { id: true, nome: true, telefone: true, categoriaId: true } }));
-    }
-    const contactsByPhone = new Map<string, any>();
-    [...filteredContacts, ...manualContacts].forEach(contact => contactsByPhone.set(contact.telefone, contact));
-    const campaignContacts = [...contactsByPhone.values()];
-
-    console.log(`📊 Contatos encontrados com categorias:`, filteredContacts.length, '· manuais:', manualContacts.length);
-
-    if (campaignContacts.length === 0) {
-      return res.status(400).json({ error: 'Nenhum contato encontrado e nenhum número manual informado' });
+      if (!isDraft && campaignContacts.length === 0) {
+        return res.status(400).json({ error: 'Nenhum contato encontrado e nenhum número manual informado' });
+      }
     }
 
     // Criar campanha
     const campaign = await prisma.campaign.create({
       data: {
         nome,
-        targetTags: JSON.stringify(targetTags),
-        sessionNames: JSON.stringify(sessionNames),
-        sessionName: sessionNames[0], // Para compatibilidade
+        targetTags: JSON.stringify(targetTags || []),
+        sessionNames: JSON.stringify(sessionNames || []),
+        sessionName: (sessionNames && sessionNames[0]) || null, // Para compatibilidade
         messageType,
         messageContent: JSON.stringify(messageContent),
-        randomDelay,
-        startImmediately,
-        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        randomDelay: randomDelay || 30,
+        startImmediately: willStartImmediately,
+        scheduledFor: finalScheduledFor,
         totalContacts: campaignContacts.length,
-        status: startImmediately ? 'RUNNING' : 'PENDING',
-        startedAt: startImmediately ? new Date() : null,
+        status: finalStatus,
+        startedAt: willStartImmediately ? new Date() : null,
         createdBy: req.user?.id,
         createdByName: req.user?.nome,
         tenantId: req.tenantId
       }
     });
 
-    // Criar mensagens para cada contato filtrado
-    const campaignMessages = campaignContacts.map((contact: any) => ({
-      campaignId: campaign.id,
-      contactId: contact.id,
-      contactPhone: contact.telefone,
-      contactName: contact.nome,
-      tenantId: campaign.tenantId
-    }));
-
-    await prisma.campaignMessage.createMany({
-      data: campaignMessages
-    });
+    // Criar mensagens para cada contato filtrado (somente se houver contatos)
+    if (campaignContacts.length > 0) {
+      const campaignMessages = campaignContacts.map((contact: any) => ({
+        campaignId: campaign.id,
+        contactId: contact.id,
+        contactPhone: contact.telefone,
+        contactName: contact.nome,
+        tenantId: campaign.tenantId
+      }));
+      await prisma.campaignMessage.createMany({
+        data: campaignMessages
+      });
+    }
 
     res.status(201).json({
       message: 'Campanha criada com sucesso',
@@ -314,13 +332,29 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
 export const updateCampaign = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { nome, targetTags, sessionNames, messageType, messageContent, randomDelay, startImmediately, scheduledFor } = req.body;
+    const {
+      nome,
+      targetTags,
+      sessionNames,
+      manualPhones,
+      messageType,
+      messageContent,
+      randomDelay,
+      startImmediately,
+      scheduledFor,
+      status,
+      sendMode
+    } = req.body;
     const where: any = { id };
-    if (req.user?.role !== 'SUPERADMIN') where.tenantId = req.tenantId;
+    if (req.user?.role !== 'SUPERADMIN' && req.tenantId) {
+      where.OR = [
+        { tenantId: req.tenantId },
+        { tenantId: null }
+      ];
+    }
     const existing = await prisma.campaign.findFirst({ where });
     if (!existing) return res.status(404).json({ error: 'Campanha não encontrada' });
-    // Only model fields are allowed through. Form-only inputs such as manualPhones
-    // are used at creation time to create contacts and must never reach Prisma update.
+
     const updateData: any = {};
     if (nome !== undefined) updateData.nome = nome;
     if (targetTags !== undefined) updateData.targetTags = JSON.stringify(targetTags);
@@ -331,21 +365,110 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
     if (messageType !== undefined) updateData.messageType = messageType;
     if (messageContent !== undefined) updateData.messageContent = JSON.stringify(messageContent);
     if (randomDelay !== undefined) updateData.randomDelay = randomDelay;
-    if (startImmediately !== undefined) updateData.startImmediately = startImmediately;
-    if (scheduledFor !== undefined) updateData.scheduledFor = scheduledFor ? new Date(scheduledFor) : null;
+
+    // Determinar novo status e modo de envio se fornecidos
+    const isDraft = status === 'DRAFT' || sendMode === 'draft';
+    if (isDraft) {
+      updateData.status = 'DRAFT';
+      updateData.startImmediately = false;
+      updateData.scheduledFor = null;
+    } else if (startImmediately !== undefined || status !== undefined || scheduledFor !== undefined || sendMode !== undefined) {
+      const willStartImmediately = startImmediately === true || status === 'RUNNING' || sendMode === 'immediate';
+      if (willStartImmediately) {
+        updateData.status = 'RUNNING';
+        updateData.startImmediately = true;
+        updateData.scheduledFor = null;
+        updateData.startedAt = existing.startedAt || new Date();
+
+        // Se a campanha já estava COMPLETED, resetar mensagens para PENDING para permitir novo disparo
+        if (existing.status === 'COMPLETED') {
+          await prisma.campaignMessage.updateMany({
+            where: { campaignId: id },
+            data: { status: 'PENDING', sentAt: null, errorMessage: null }
+          });
+          updateData.sentCount = 0;
+          updateData.failedCount = 0;
+          updateData.completedAt = null;
+        }
+      } else if (scheduledFor || sendMode === 'scheduled' || status === 'PENDING') {
+        updateData.status = 'PENDING';
+        updateData.startImmediately = false;
+        updateData.scheduledFor = scheduledFor ? new Date(scheduledFor) : existing.scheduledFor;
+      } else if (status) {
+        updateData.status = status;
+      }
+    }
+
+    // Se informou novos telefones manuais ou alterou tags, sincronizar contatos
+    const hasNewManualPhones = typeof manualPhones === 'string' && manualPhones.trim().length > 0;
+    const hasTagsChange = targetTags !== undefined && Array.isArray(targetTags) && JSON.stringify(targetTags) !== existing.targetTags;
+
+    if (hasNewManualPhones || (hasTagsChange && targetTags.length > 0)) {
+      const tenantId = req.tenantId;
+      let parsedManualPhones: string[] = [];
+      if (hasNewManualPhones) {
+        try {
+          parsedManualPhones = parseManualPhones(manualPhones);
+        } catch (error) {
+          return res.status(400).json({ error: error instanceof Error ? error.message : 'Números manuais inválidos' });
+        }
+      }
+
+      const activeTags = targetTags !== undefined ? targetTags : JSON.parse(existing.targetTags || '[]');
+      const filteredContacts = activeTags.length > 0
+        ? await prisma.contact.findMany({
+            where: { categoriaId: { in: activeTags }, tenantId },
+            select: { id: true, nome: true, telefone: true, categoriaId: true }
+          })
+        : [];
+
+      const manualContacts = [] as Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }>;
+      for (const phone of parsedManualPhones) {
+        const found = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
+        manualContacts.push(found ? found : { id: null, nome: `Lead ${phone}`, telefone: phone, categoriaId: null });
+      }
+
+      const contactsByPhone = new Map<string, any>();
+      [...filteredContacts, ...manualContacts].forEach(contact => contactsByPhone.set(contact.telefone, contact));
+      const newContacts = [...contactsByPhone.values()];
+
+      if (newContacts.length > 0 && (['DRAFT', 'PENDING', 'PAUSED'].includes(existing.status) || existing.sentCount === 0)) {
+        await prisma.campaignMessage.deleteMany({ where: { campaignId: id } });
+        const newMessages = newContacts.map(contact => ({
+          campaignId: id,
+          contactId: contact.id,
+          contactPhone: contact.telefone,
+          contactName: contact.nome,
+          tenantId: existing.tenantId
+        }));
+        await prisma.campaignMessage.createMany({ data: newMessages });
+        updateData.totalContacts = newContacts.length;
+        updateData.sentCount = 0;
+        updateData.failedCount = 0;
+      }
+    }
 
     const campaign = await prisma.campaign.update({
       where: { id },
       data: updateData
     });
 
+    const safeParse = (val: any, fallback: any = {}) => {
+      try {
+        if (!val) return fallback;
+        return typeof val === 'string' ? JSON.parse(val) : val;
+      } catch {
+        return fallback;
+      }
+    };
+
     res.json({
       message: 'Campanha atualizada com sucesso',
       campaign: {
         ...campaign,
-        targetTags: JSON.parse(campaign.targetTags),
-        sessionNames: campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [],
-        messageContent: JSON.parse(campaign.messageContent)
+        targetTags: safeParse(campaign.targetTags, []),
+        sessionNames: campaign.sessionNames ? safeParse(campaign.sessionNames, []) : [],
+        messageContent: safeParse(campaign.messageContent, {})
       }
     });
   } catch (error) {
@@ -393,6 +516,17 @@ export const toggleCampaign = async (req: AuthenticatedRequest, res: Response) =
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campanha não encontrada' });
+    }
+
+    if (action === 'resume' && campaign.status === 'DRAFT') {
+      const sessionNames = campaign.sessionNames ? JSON.parse(campaign.sessionNames) : (campaign.sessionName ? [campaign.sessionName] : []);
+      if (sessionNames.length === 0) {
+        return res.status(400).json({ error: 'Configure ao menos uma conexão WhatsApp antes de iniciar a campanha.' });
+      }
+      const messageCount = await prisma.campaignMessage.count({ where: { campaignId: id } });
+      if (messageCount === 0) {
+        return res.status(400).json({ error: 'Configure contatos ou categorias antes de iniciar a campanha.' });
+      }
     }
 
     const newStatus = action === 'pause' ? 'PAUSED' : 'RUNNING';

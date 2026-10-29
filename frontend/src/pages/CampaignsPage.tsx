@@ -106,6 +106,7 @@ export function CampaignsPage() {
     messageType: 'sequence',
     messageContent: { sequence: [{ type: 'uazapi', content: { composition: { type: 'text', text: '' } } }] as Array<{ type: string; content: any }> } as MessageContent,
     randomDelay: 30,
+    sendMode: 'immediate' as 'immediate' | 'scheduled' | 'draft',
     startImmediately: true,
     scheduledFor: ''
   });
@@ -114,6 +115,8 @@ export function CampaignsPage() {
     loadCampaigns();
     loadContactTags();
     loadWhatsAppSessions();
+    const groupLeads = localStorage.getItem('ruptur_campaign_group_leads');
+    if (groupLeads) { setFormData(prev => ({ ...prev, manualPhones: groupLeads })); localStorage.removeItem('ruptur_campaign_group_leads'); setShowCreateModal(true); toast.success('Leads dos grupos carregados na campanha'); }
   }, []);
 
   // Helper para fazer requisições autenticadas
@@ -216,54 +219,70 @@ export function CampaignsPage() {
   const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (formData.targetTags.length === 0 && !formData.manualPhones.trim()) {
+    if (formData.sendMode !== 'draft' && !editingCampaignId && formData.targetTags.length === 0 && !formData.manualPhones.trim()) {
       toast.error('Selecione uma categoria ou informe números manualmente');
       return;
     }
 
-    if (formData.sessionNames.length === 0) {
+    if (formData.sendMode !== 'draft' && formData.sessionNames.length === 0) {
       toast.error('Selecione pelo menos uma conexão WhatsApp');
       return;
     }
 
-    if (!('sequence' in formData.messageContent) || formData.messageContent.sequence.length === 0) {
+    if (!formData.nome.trim()) {
+      toast.error('Informe o nome da campanha');
+      return;
+    }
+
+    if (formData.sendMode !== 'draft' && (!('sequence' in formData.messageContent) || formData.messageContent.sequence.length === 0)) {
       toast.error('Adicione pelo menos uma mensagem à campanha');
       return;
     }
 
     try {
-      const sequence = formData.messageContent.sequence;
-      const isSequence = sequence.length > 1;
+      const sequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
 
-      let finalMessageType: string;
-      let finalMessageContent: any;
+      let finalMessageType = 'text';
+      let finalMessageContent: any = '';
 
-      if (isSequence) {
+      if (sequence.length > 1) {
         finalMessageType = 'sequence';
         finalMessageContent = { sequence };
-      } else {
-        const singleMessage = sequence[0];
-        finalMessageType = singleMessage.type;
-        finalMessageContent = singleMessage.content;
+      } else if (sequence.length === 1) {
+        finalMessageType = sequence[0].type;
+        finalMessageContent = sequence[0].content;
       }
 
-      // Converter scheduledFor de datetime-local para ISO string
-      let scheduledForISO = null;
-      if (!formData.startImmediately && formData.scheduledFor) {
-        // datetime-local retorna formato "YYYY-MM-DDTHH:mm" SEM timezone
-        // Precisamos interpretar como horário LOCAL do usuário e converter para UTC
-        // Exemplo: usuário escolhe 2025-10-15T19:00 em UTC-3 (Brasília)
-        // Isso deve ser salvo como 2025-10-15T22:00:00.000Z (19:00 - 3 = 22:00 UTC)
-        const localDateStr = formData.scheduledFor; // "2025-10-15T19:00"
-        const localDate = new Date(localDateStr); // JavaScript interpreta como LOCAL
-        scheduledForISO = localDate.toISOString(); // Converte para UTC com timezone
+      let finalStatus = 'RUNNING';
+      let startImmediately = true;
+      let scheduledForISO: string | null = null;
+
+      if (formData.sendMode === 'draft') {
+        finalStatus = 'DRAFT';
+        startImmediately = false;
+        scheduledForISO = null;
+      } else if (formData.sendMode === 'scheduled') {
+        finalStatus = 'PENDING';
+        startImmediately = false;
+        if (!formData.scheduledFor) {
+          toast.error('Informe a data e hora do agendamento');
+          return;
+        }
+        const localDate = new Date(formData.scheduledFor);
+        scheduledForISO = localDate.toISOString();
+      } else {
+        finalStatus = 'RUNNING';
+        startImmediately = true;
+        scheduledForISO = null;
       }
 
       const campaignData = {
         ...formData,
+        status: finalStatus,
+        startImmediately,
+        scheduledFor: scheduledForISO,
         messageType: finalMessageType,
-        messageContent: finalMessageContent,
-        scheduledFor: scheduledForISO
+        messageContent: finalMessageContent
       };
 
       const response = await authenticatedFetch(editingCampaignId ? `/api/campaigns/${editingCampaignId}` : '/api/campaigns', {
@@ -304,6 +323,7 @@ export function CampaignsPage() {
       messageType: 'sequence',
       messageContent: { sequence: [{ type: 'uazapi', content: { composition: { type: 'text', text: '' } } }] },
       randomDelay: 30,
+      sendMode: 'immediate',
       startImmediately: true,
       scheduledFor: ''
     });
@@ -315,7 +335,31 @@ export function CampaignsPage() {
   const handleEditCampaign = (campaign: Campaign) => {
     const content: any = campaign.messageContent;
     const sequence = campaign.messageType === 'sequence' ? (content.sequence || []) : [{ type: campaign.messageType, content }];
-    setFormData({ nome: campaign.nome, targetTags: campaign.targetTags || [], manualPhones: '', sessionNames: campaign.sessionNames || [], sessionName: campaign.sessionName || '', messageType: 'sequence', messageContent: { sequence }, randomDelay: campaign.randomDelay, startImmediately: campaign.startImmediately, scheduledFor: campaign.scheduledFor ? campaign.scheduledFor.slice(0, 16) : '' });
+    
+    let sendMode: 'immediate' | 'scheduled' | 'draft' = 'immediate';
+    if (campaign.status === 'DRAFT') {
+      sendMode = 'draft';
+    } else if (campaign.scheduledFor && !campaign.startImmediately) {
+      sendMode = 'scheduled';
+    } else if (campaign.startImmediately) {
+      sendMode = 'immediate';
+    } else {
+      sendMode = campaign.status === 'PENDING' ? 'scheduled' : 'draft';
+    }
+
+    setFormData({
+      nome: campaign.nome,
+      targetTags: campaign.targetTags || [],
+      manualPhones: '',
+      sessionNames: campaign.sessionNames || [],
+      sessionName: campaign.sessionName || '',
+      messageType: 'sequence',
+      messageContent: { sequence },
+      randomDelay: campaign.randomDelay,
+      sendMode,
+      startImmediately: sendMode === 'immediate',
+      scheduledFor: campaign.scheduledFor ? campaign.scheduledFor.slice(0, 16) : ''
+    });
     setEditingCampaignId(campaign.id);
     setShowCreateModal(true);
   };
@@ -560,6 +604,8 @@ export function CampaignsPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'DRAFT':
+        return 'bg-purple-100 text-purple-800 border border-purple-200';
       case 'PENDING':
         return 'bg-gray-100 text-gray-800';
       case 'RUNNING':
@@ -577,6 +623,8 @@ export function CampaignsPage() {
 
   const getStatusText = (status: string) => {
     switch (status) {
+      case 'DRAFT':
+        return 'Rascunho';
       case 'PENDING':
         return 'Aguardando';
       case 'RUNNING':
@@ -806,6 +854,18 @@ export function CampaignsPage() {
                           <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
                         </svg>
                       </button>
+                      {campaign.status === 'DRAFT' && (
+                        <button
+                          onClick={() => handleToggleCampaign(campaign.id, 'resume')}
+                          className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 flex items-center gap-1 font-medium"
+                          title="Iniciar disparos desta campanha"
+                        >
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                          </svg>
+                          Iniciar
+                        </button>
+                      )}
                       {campaign.status !== 'RUNNING' && (
                         <button onClick={() => handleEditCampaign(campaign)} className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700" title="Editar campanha">✎</button>
                       )}
@@ -1031,7 +1091,7 @@ export function CampaignsPage() {
                       </p>
                     </div>
 
-                    {/* Data de Envio */}
+                    {/* Modo de Envio */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Quando Enviar
@@ -1040,36 +1100,51 @@ export function CampaignsPage() {
                         <label className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
                           <input
                             type="radio"
-                            checked={formData.startImmediately}
-                            onChange={() => setFormData(prev => ({ ...prev, startImmediately: true }))}
+                            name="sendMode"
+                            checked={formData.sendMode === 'immediate'}
+                            onChange={() => setFormData(prev => ({ ...prev, sendMode: 'immediate', startImmediately: true }))}
                             className="text-blue-600 focus:ring-blue-500"
                           />
                           <div>
                             <span className="text-sm font-medium text-gray-700">🚀 Iniciar imediatamente</span>
-                            <p className="text-xs text-gray-500">A campanha será executada assim que for criada</p>
+                            <p className="text-xs text-gray-500">A campanha começará a enviar mensagens assim que for salva</p>
                           </div>
                         </label>
                         <label className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
                           <input
                             type="radio"
-                            checked={!formData.startImmediately}
-                            onChange={() => setFormData(prev => ({ ...prev, startImmediately: false }))}
+                            name="sendMode"
+                            checked={formData.sendMode === 'scheduled'}
+                            onChange={() => setFormData(prev => ({ ...prev, sendMode: 'scheduled', startImmediately: false }))}
                             className="text-blue-600 focus:ring-blue-500"
                           />
                           <div>
                             <span className="text-sm font-medium text-gray-700">📅 Agendar para:</span>
-                            <p className="text-xs text-gray-500">Escolha data e hora específicas</p>
+                            <p className="text-xs text-gray-500">Escolha data e hora específicas para o disparo</p>
                           </div>
                         </label>
-                        {!formData.startImmediately && (
+                        {formData.sendMode === 'scheduled' && (
                           <input
                             type="datetime-local"
                             value={formData.scheduledFor}
                             onChange={(e) => setFormData(prev => ({ ...prev, scheduledFor: e.target.value }))}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ml-6"
-                            required={!formData.startImmediately}
+                            required={formData.sendMode === 'scheduled'}
                           />
                         )}
+                        <label className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="sendMode"
+                            checked={formData.sendMode === 'draft'}
+                            onChange={() => setFormData(prev => ({ ...prev, sendMode: 'draft', startImmediately: false, scheduledFor: '' }))}
+                            className="text-blue-600 focus:ring-blue-500"
+                          />
+                          <div>
+                            <span className="text-sm font-medium text-gray-700">📝 Salvar como rascunho</span>
+                            <p className="text-xs text-gray-500">A campanha fica salva como rascunho sem iniciar envios</p>
+                          </div>
+                        </label>
                       </div>
                     </div>
                   </div>
@@ -2200,7 +2275,11 @@ export function CampaignsPage() {
                     type="submit"
                     className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all font-medium shadow-lg"
                   >
-                    {editingCampaignId ? 'Salvar alterações' : 'Criar Campanha'}
+                    {formData.sendMode === 'draft'
+                      ? (editingCampaignId ? 'Salvar Rascunho' : 'Salvar como Rascunho')
+                      : formData.sendMode === 'scheduled'
+                        ? (editingCampaignId ? 'Salvar Agendamento' : 'Agendar Campanha')
+                        : (editingCampaignId ? 'Salvar e Iniciar' : 'Criar Campanha')}
                   </button>
                 </div>
               </form>

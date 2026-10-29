@@ -8,6 +8,7 @@ import { Navigation } from './components/Navigation';
 import { ContactsPage } from './pages/ContactsPage';
 import { WhatsAppConnectionsPage } from './pages/WhatsAppConnectionsPage';
 import { CampaignsPage } from './pages/CampaignsPage';
+import { GroupsPage } from './pages/GroupsPage';
 import { InteractiveCampaignPage } from './pages/InteractiveCampaignPage';
 import { FlowBuilderPage } from './pages/FlowBuilderPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -128,6 +129,7 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
+          <Route path="/grupos" element={<ProtectedRoute><GroupsPage /></ProtectedRoute>} />
           <Route
             path="/campanhas/interativa"
             element={
@@ -191,6 +193,18 @@ function AppContent() {
 }
 
 function App() {
+  useEffect(() => {
+    const receiveMegaSso = (event: MessageEvent) => {
+      if (event.origin !== 'https://mega.ruptur.cloud' || event.source !== window.parent) return;
+      const token = event.data?.type === 'ruptur-mega-sso' ? event.data.token : '';
+      if (!token || typeof token !== 'string') return;
+      if (localStorage.getItem('auth_token') === token) return;
+      localStorage.setItem('auth_token', token);
+      window.location.reload();
+    };
+    window.addEventListener('message', receiveMegaSso);
+    return () => window.removeEventListener('message', receiveMegaSso);
+  }, []);
   return (
     <Router>
       <AuthProvider>
