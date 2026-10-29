@@ -894,6 +894,18 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
   const renderTextConfig = () => {
     return (
       <div className="space-y-4">
+        <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+          <label className="block text-xs font-semibold text-blue-900">
+            📌 Cabeçalho / Header (opcional)
+          </label>
+          <input
+            type="text"
+            value={config.headerText || ''}
+            onChange={(e) => setConfig({ ...config, headerText: e.target.value })}
+            placeholder="Título em destaque no topo da mensagem..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
+          />
+        </div>
         <div className="space-y-3">
           {/* Checkbox para usar variações */}
           <div className="flex items-center space-x-2">
@@ -1054,6 +1066,20 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
   const renderGenericMediaConfig = (mediaType: 'image' | 'video' | 'audio' | 'document', label: string, icon: string, accept: string) => {
     return (
       <div className="space-y-4">
+        {['image', 'video', 'document'].includes(mediaType) && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+            <label className="block text-xs font-semibold text-blue-900">
+              📌 Cabeçalho / Header (opcional)
+            </label>
+            <input
+              type="text"
+              value={config.headerText || ''}
+              onChange={(e) => setConfig({ ...config, headerText: e.target.value })}
+              placeholder="Título em destaque no topo da mídia..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-primary"
+            />
+          </div>
+        )}
         <div className="space-y-3">
           {/* Checkbox para usar variações */}
           <div className="flex items-center space-x-2">

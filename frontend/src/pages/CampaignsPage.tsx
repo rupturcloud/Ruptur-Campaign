@@ -57,8 +57,20 @@ interface ContactTag {
 function compositionForPreview(item: { type: string; content: any } | undefined) {
   if (!item || item.type === 'wait') return { type: 'text', text: 'Adicione uma mensagem para ver a prévia.' };
   if (item.type === 'uazapi') return item.content?.composition || item.content || { type: 'text', text: '' };
-  if (['image', 'video', 'audio', 'document'].includes(item.type)) return { type: item.type, file: item.content?.url || '', text: item.content?.caption || '' };
-  return { type: 'text', text: item.content?.text || item.content?.caption || `Mensagem ${item.type}` };
+  if (['image', 'video', 'audio', 'document'].includes(item.type)) {
+    return {
+      type: item.type,
+      headerText: item.content?.headerText || '',
+      file: item.content?.url || '',
+      text: item.content?.caption || '',
+      docName: item.content?.fileName || '',
+    };
+  }
+  return {
+    type: 'text',
+    headerText: item.content?.headerText || '',
+    text: item.content?.text || item.content?.caption || `Mensagem ${item.type}`,
+  };
 }
 
 function technicalPreview(item: { type: string; content: any }) {
@@ -1240,16 +1252,18 @@ export function CampaignsPage() {
                                   value={item.type}
                                   onChange={(e) => {
                                     const newType = e.target.value;
+                                    const prevHeader = item.content?.headerText || item.content?.composition?.headerText || '';
+                                    const prevText = item.content?.text || item.content?.caption || item.content?.composition?.text || '';
                                     let newContent;
                                     switch (newType) {
                                       case 'uazapi':
-                                        newContent = { composition: { type: 'text', text: '' } };
+                                        newContent = { composition: { type: 'text', headerText: prevHeader, text: prevText } };
                                         break;
                                       case 'text':
-                                        newContent = { text: '' };
+                                        newContent = { headerText: prevHeader, text: prevText };
                                         break;
                                       case 'document':
-                                        newContent = { url: '', fileName: '' };
+                                        newContent = { headerText: prevHeader, url: item.content?.url || '', fileName: '', caption: prevText };
                                         break;
                                       case 'openai':
                                         newContent = { model: '', system: '', user: '' };
@@ -1261,7 +1275,7 @@ export function CampaignsPage() {
                                         newContent = { waitTime: 30 };
                                         break;
                                       default:
-                                        newContent = { url: '', caption: '' };
+                                        newContent = { headerText: prevHeader, url: item.content?.url || '', caption: prevText };
                                         break;
                                     }
 
@@ -1282,7 +1296,6 @@ export function CampaignsPage() {
                                   <option value="video">🎬 Vídeo</option>
                                   <option value="audio">🎵 Áudio</option>
                                   <option value="document">📄 Arquivo</option>
-                                  <option value="uazapi">🧩 Uazapi — composição completa</option>
                                   <option value="openai">🤖 OpenAI</option>
                                   <option value="groq">⚡ Groq AI</option>
                                   <option value="wait">⏱️ Espera</option>
@@ -1300,7 +1313,64 @@ export function CampaignsPage() {
                                 )}
 
                                 {item.type === 'text' && (
-                                  <div className="space-y-2">
+                                  <div className="space-y-3">
+                                    {/* Bloco de Cabeçalho (Header) para Texto */}
+                                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <label className="block text-xs font-semibold text-blue-900">
+                                          📌 Cabeçalho / Header (opcional — aparece em destaque no topo)
+                                        </label>
+                                        {item.content.headerText && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                              const newSequence = currentSequence.map((seqItem, i) =>
+                                                i === index ? { ...seqItem, content: { ...seqItem.content, headerText: '' } } : seqItem
+                                              );
+                                              setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                            }}
+                                            className="text-xs text-red-600 hover:text-red-800"
+                                          >
+                                            Limpar
+                                          </button>
+                                        )}
+                                      </div>
+                                      <input
+                                        type="text"
+                                        placeholder="Digite o cabeçalho da mensagem (ex: Olá {{nome}} — Aviso Importante)"
+                                        value={item.content.headerText || ''}
+                                        onChange={(e) => {
+                                          const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                          const newSequence = currentSequence.map((seqItem, i) =>
+                                            i === index ? { ...seqItem, content: { ...seqItem.content, headerText: e.target.value } } : seqItem
+                                          );
+                                          setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                        }}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      />
+                                      <div className="flex flex-wrap gap-1">
+                                        <span className="text-xs text-gray-500">Variáveis no cabeçalho:</span>
+                                        {['{{nome}}', '{{telefone}}'].map((variable) => (
+                                          <button
+                                            key={variable}
+                                            type="button"
+                                            onClick={() => {
+                                              const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                              const curH = currentSequence[index]?.content?.headerText || '';
+                                              const newSequence = currentSequence.map((seqItem, i) =>
+                                                i === index ? { ...seqItem, content: { ...seqItem.content, headerText: curH + variable } } : seqItem
+                                              );
+                                              setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                            }}
+                                            className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200"
+                                          >
+                                            {variable}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+
                                     {/* Checkbox para usar variações */}
                                     <div className="flex items-center space-x-2">
                                       <input
@@ -1429,7 +1499,7 @@ export function CampaignsPage() {
                                           onChange={(e) => {
                                             const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
                                             const newSequence = currentSequence.map((seqItem, i) =>
-                                              i === index ? { ...seqItem, content: { text: e.target.value } } : seqItem
+                                              i === index ? { ...seqItem, content: { ...seqItem.content, text: e.target.value } } : seqItem
                                             );
                                             setFormData(prev => ({
                                               ...prev,
@@ -1475,7 +1545,7 @@ export function CampaignsPage() {
                                               // Adicionar ao texto único
                                               const currentText = currentSequence[index]?.content?.text || '';
                                               const newSequence = currentSequence.map((seqItem, i) =>
-                                                i === index ? { ...seqItem, content: { text: currentText + variable } } : seqItem
+                                                i === index ? { ...seqItem, content: { ...seqItem.content, text: currentText + variable } } : seqItem
                                               );
                                               setFormData(prev => ({
                                                 ...prev,
@@ -1788,6 +1858,65 @@ export function CampaignsPage() {
 
                                 {['image', 'video', 'audio', 'document'].includes(item.type) && (
                                   <div className="space-y-3">
+                                    {/* Bloco de Cabeçalho (Header) para Mídia */}
+                                    {['image', 'video', 'document'].includes(item.type) && (
+                                      <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                          <label className="block text-xs font-semibold text-blue-900">
+                                            📌 Cabeçalho / Header da Mídia (opcional — aparece em destaque no topo)
+                                          </label>
+                                          {item.content.headerText && (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                                const newSequence = currentSequence.map((seqItem, i) =>
+                                                  i === index ? { ...seqItem, content: { ...seqItem.content, headerText: '' } } : seqItem
+                                                );
+                                                setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                              }}
+                                              className="text-xs text-red-600 hover:text-red-800"
+                                            >
+                                              Limpar
+                                            </button>
+                                          )}
+                                        </div>
+                                        <input
+                                          type="text"
+                                          placeholder="Digite o cabeçalho para acompanhar a mídia (ex: 🔥 Confira {{nome}}!)"
+                                          value={item.content.headerText || ''}
+                                          onChange={(e) => {
+                                            const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                            const newSequence = currentSequence.map((seqItem, i) =>
+                                              i === index ? { ...seqItem, content: { ...seqItem.content, headerText: e.target.value } } : seqItem
+                                            );
+                                            setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                          }}
+                                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                        <div className="flex flex-wrap gap-1">
+                                          <span className="text-xs text-gray-500">Variáveis no cabeçalho:</span>
+                                          {['{{nome}}', '{{telefone}}'].map((variable) => (
+                                            <button
+                                              key={variable}
+                                              type="button"
+                                              onClick={() => {
+                                                const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                                const curH = currentSequence[index]?.content?.headerText || '';
+                                                const newSequence = currentSequence.map((seqItem, i) =>
+                                                  i === index ? { ...seqItem, content: { ...seqItem.content, headerText: curH + variable } } : seqItem
+                                                );
+                                                setFormData(prev => ({ ...prev, messageContent: { sequence: newSequence } }));
+                                              }}
+                                              className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200"
+                                            >
+                                              {variable}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
                                     <div className="flex items-center justify-between">
                                       <label className="block text-sm font-medium text-gray-700">
                                         Arquivo
@@ -2111,7 +2240,7 @@ export function CampaignsPage() {
                                       </>
                                     )}
 
-                                    {['image', 'video'].includes(item.type) && !item.content.useMediaVariations && (
+                                    {['image', 'video', 'document'].includes(item.type) && !item.content.useMediaVariations && (
                                       <div className="space-y-2">
                                         <input
                                           type="text"
@@ -2248,7 +2377,7 @@ export function CampaignsPage() {
                     <div className="mx-auto w-fit xl:sticky xl:top-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
                       <p className="mb-2 text-center text-xs font-medium text-emerald-900">Prévia da sequência</p>
                       <div className="mb-3 max-h-56 space-y-2 overflow-y-auto rounded-lg border border-emerald-100 bg-white p-2">
-                        {numberedSequencePreview('sequence' in formData.messageContent ? formData.messageContent.sequence : []).map(({ item, index, messageNumber }) => item.type === 'wait' ? <div key={index} className="rounded bg-amber-50 px-2 py-1 text-center text-[11px] text-amber-800">Intervalo antes da próxima mensagem · {item.content?.waitTime || 30}s</div> : <div key={index} className="rounded border border-slate-200 p-2 text-[11px]"><strong>Mensagem {messageNumber}</strong><p className="mt-1 line-clamp-2 text-slate-600">{compositionForPreview(item).text || 'Composição sem texto'}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{technicalPreview(item).route} · {technicalPreview(item).label} · presença {technicalPreview(item).delay}ms</p></div>)}
+                        {numberedSequencePreview('sequence' in formData.messageContent ? formData.messageContent.sequence : []).map(({ item, index, messageNumber }) => item.type === 'wait' ? <div key={index} className="rounded bg-amber-50 px-2 py-1 text-center text-[11px] text-amber-800">Intervalo antes da próxima mensagem · {item.content?.waitTime || 30}s</div> : <div key={index} className="rounded border border-slate-200 p-2 text-[11px]"><strong>Mensagem {messageNumber}</strong>{(compositionForPreview(item).headerText || compositionForPreview(item).title) && <p className="mt-1 font-bold text-slate-900 line-clamp-1">📌 {compositionForPreview(item).headerText || compositionForPreview(item).title}</p>}<p className="mt-0.5 line-clamp-2 text-slate-600">{compositionForPreview(item).text || 'Composição sem texto'}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{technicalPreview(item).route} · {technicalPreview(item).label} · presença {technicalPreview(item).delay}ms</p></div>)}
                       </div>
                       <UazapiPhonePreview composition={compositionForPreview((('sequence' in formData.messageContent ? formData.messageContent.sequence : []).find(item => item.type !== 'wait')))} onReorderButtons={(from, to) => {
                         const sequence = ('sequence' in formData.messageContent ? formData.messageContent.sequence : []);

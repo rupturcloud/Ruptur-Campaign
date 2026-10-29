@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 const previewLabels: Record<string, string> = {
   button: 'Botões', list: 'Lista', poll: 'Enquete', carousel: 'Carrossel',
   location_button: 'Solicitar localização', contact: 'Compartilhar contato', location: 'Localização',
@@ -16,7 +18,8 @@ export function UazapiPhonePreview({ composition, onReorderButtons }: { composit
   const c = composition || {};
   const type = c.type || 'text';
   const title = previewLabels[type] || 'Mensagem';
-  const text = c.text || (type === 'contact' ? c.fullName : type === 'location' ? c.name || 'Localização' : type === 'pix_button' ? `PIX para ${c.pixName || 'recebedor'}` : 'Sua mensagem aparecerá aqui');
+  const headerVal = (c.headerText || c.title || '').trim();
+  const text = c.text || (type === 'contact' ? c.fullName : type === 'location' ? c.name || 'Localização' : type === 'pix_button' ? `PIX para ${c.pixName || 'recebedor'}` : headerVal ? '' : 'Sua mensagem aparecerá aqui');
   const choices = choicesOf(c);
   const cards = Array.isArray(c.carousel) ? c.carousel : [];
   const media = ['image', 'video', 'videoplay', 'document', 'audio', 'myaudio', 'ptt', 'ptv', 'sticker'].includes(type);
@@ -28,14 +31,24 @@ export function UazapiPhonePreview({ composition, onReorderButtons }: { composit
         <div><strong className="block text-xs">Ruptur Campaign</strong><span className="text-[10px] text-emerald-100">online</span></div>
       </div>
       <div className="min-h-[430px] bg-[#efeae2] p-3" style={{ backgroundImage: 'radial-gradient(#d8d1c5 0.7px, transparent 0.7px)', backgroundSize: '12px 12px' }}>
-        <p className="mb-2 text-center text-[10px] text-slate-500">Prévia experimental · {title}</p>
+        <p className="mb-2 text-center text-[10px] text-slate-500">Prévia · {title}</p>
         <div className="ml-auto max-w-[92%] overflow-hidden rounded-lg rounded-tr-none bg-[#d9fdd3] shadow-sm">
-          {media && <div className="grid h-28 place-items-center bg-slate-300 text-3xl">{type === 'document' ? '📄' : type.includes('audio') || type === 'ptt' ? '▶︎' : '▧'}</div>}
+          {media && (
+            type === 'image' && c.file ? (
+              <div className="border-b bg-slate-200 overflow-hidden">
+                <img src={c.file} alt="Mídia" className="max-h-36 w-full object-cover" onError={(e: any) => { e.target.style.display = 'none'; }} />
+              </div>
+            ) : (
+              <div className="grid h-28 place-items-center bg-slate-300 text-3xl">
+                {type === 'document' ? '📄' : type.includes('audio') || type === 'ptt' ? '▶︎' : '▧'}
+              </div>
+            )
+          )}
           {type === 'location' && <div className="grid h-24 place-items-center bg-emerald-100 text-3xl">📍</div>}
           {type === 'contact' && <div className="border-b bg-white p-3 text-sm">👤 <strong>{c.fullName || 'Contato'}</strong><br /><span className="text-xs text-slate-500">{c.phoneNumber || 'Telefone'}</span></div>}
           {c.imageButton && <div className="border-b bg-slate-200 overflow-hidden"><img src={c.imageButton} alt="Cabeçalho" className="max-h-36 w-full object-cover" onError={(e: any) => { e.target.style.display = 'none'; }} /></div>}
           <div className="p-2.5 text-xs leading-relaxed text-slate-800 whitespace-pre-wrap">
-            {(c.headerText || c.title) && <strong className="block mb-1 font-bold text-slate-900">{c.headerText || c.title}</strong>}
+            {headerVal && <strong className="block mb-1 font-bold text-slate-900">{headerVal}</strong>}
             {text}
             {c.footerText && <span className="block mt-1 text-[10px] text-slate-500 italic">{c.footerText}</span>}
           </div>
@@ -44,11 +57,10 @@ export function UazapiPhonePreview({ composition, onReorderButtons }: { composit
           {type === 'pix_button' && <button type="button" disabled className="w-full border-t py-2 text-xs font-medium text-[#00a884]">PIX · {c.pixKey || 'Chave PIX'}</button>}
           {type === 'payment' && <div className="border-t p-2 text-xs"><strong>{c.itemName || c.title || 'Pagamento'}</strong><br />R$ {Number(c.amount || 0).toFixed(2)}</div>}
           {choices.map((choice: string, index: number) => <div key={index} draggable={!!onReorderButtons} onDragStart={() => setDraggedButton(index)} onDragOver={e => onReorderButtons && e.preventDefault()} onDrop={() => { if (onReorderButtons && draggedButton !== null && draggedButton !== index) onReorderButtons(draggedButton, index); setDraggedButton(null); }} className={`block w-full border-t px-2 py-2 text-center text-xs font-medium text-[#00a884] ${onReorderButtons ? 'cursor-grab active:cursor-grabbing' : ''}`}>{choice.split('|')[0].replace(/^\[[^\]]+\]$/, '')}{onReorderButtons && <span className="ml-1 text-slate-400">⋮⋮</span>}</div>)}
-          {type === 'carousel' && <div className="flex gap-2 overflow-hidden border-t p-2">{cards.slice(0, 2).map((card: any, index: number) => <div key={index} className="min-w-[155px] rounded bg-white p-2 text-[10px] shadow"><div className="mb-1 grid h-12 place-items-center bg-slate-200">{card.image ? '▧' : 'Sem mídia'}</div><strong>{card.text || `Cartão ${index + 1}`}</strong>{(card.buttons || []).slice(0, 2).map((button: any, buttonIndex: number) => <div key={buttonIndex} className="mt-1 border-t pt-1 text-center text-[#00a884]">{button.text || 'Botão'}</div>)}</div>)}</div>}
+          {type === 'carousel' && <div className="flex gap-2 overflow-x-auto border-t p-2">{cards.slice(0, 3).map((card: any, index: number) => <div key={index} className="min-w-[155px] rounded bg-white p-2 text-[10px] shadow"><div className="mb-1 grid h-16 place-items-center overflow-hidden rounded bg-slate-200">{card.image ? <img src={card.image} alt="" className="h-full w-full object-cover" onError={(e: any) => { e.target.style.display = 'none'; }} /> : 'Sem mídia'}</div>{(card.headerText || card.title) && <strong className="block text-[11px] font-bold text-slate-900">{card.headerText || card.title}</strong>}<span className="block text-slate-700">{card.text || `Cartão ${index + 1}`}</span>{(card.buttons || []).slice(0, 2).map((button: any, buttonIndex: number) => <div key={buttonIndex} className="mt-1 border-t pt-1 text-center text-[#00a884]">{button.text || 'Botão'}</div>)}</div>)}</div>}
           <div className="px-2 pb-1 text-right text-[9px] text-slate-500">agora ✓✓</div>
         </div>
       </div>
     </div>
   </aside>;
 }
-import { useState } from 'react';

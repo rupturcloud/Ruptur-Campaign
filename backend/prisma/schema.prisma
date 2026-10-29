@@ -39,6 +39,11 @@ model Tenant {
   connections                  Connection[]
   interactiveCampaigns         InteractiveCampaign[]
   interactiveCampaignSessions  InteractiveCampaignSession[]
+  whatsappGroups               WhatsAppGroup[]
+  leads                        Lead[]
+  leadLists                    LeadList[]
+  leadListMembers              LeadListMember[]
+  groupLeads                   GroupLead[]
 
   @@map("tenants")
 }
@@ -70,6 +75,8 @@ model TenantSettings {
   chatwootApiToken   String?  @map("chatwoot_api_token")
   perfexUrl          String?  @map("perfex_url")
   perfexToken        String?  @map("perfex_token")
+  uazapiUrl          String?  @map("uazapi_url")
+  uazapiAdminToken   String?  @map("uazapi_admin_token")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
@@ -103,7 +110,8 @@ model GlobalSettings {
   singleton       Boolean  @default(true) @unique // Ensures only one record
   wahaHost        String   @default("") @map("waha_host")
   wahaApiKey      String   @default("") @map("waha_api_key")
-  uazapiHost      String   @default("") @map("uazapi_host")
+  uazapiHost       String   @default("") @map("uazapi_host")
+  uazapiAdminToken String   @default("") @map("uazapi_admin_token")
   evolutionHost   String   @default("") @map("evolution_host")
   evolutionApiKey String   @default("") @map("evolution_api_key")
   quepasaUrl      String   @default("") @map("quepasa_url")
@@ -190,6 +198,7 @@ model WhatsAppSession {
   interactiveCampaignEnabled Boolean    @default(false) @map("interactive_campaign_enabled") // Habilitar webhooks para campanhas interativas
   webhookSecret              String?    @map("webhook_secret") // Token único para validar webhooks
   campaigns                  Campaign[]
+  groups                     WhatsAppGroup[]
 
   // Relations
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -233,7 +242,7 @@ model Campaign {
 model CampaignMessage {
   id                String    @id @default(uuid())
   campaignId        String    @map("campaign_id")
-  contactId         String    @map("contact_id")
+  contactId         String?   @map("contact_id")
   contactPhone      String    @map("contact_phone")
   contactName       String    @map("contact_name")
   status            String    @default("PENDING")
@@ -254,6 +263,95 @@ model CampaignMessage {
 
   @@index([tenantId])
   @@map("campaign_messages")
+}
+
+model WhatsAppGroup {
+  id                String   @id @default(uuid())
+  tenantId          String   @map("tenant_id")
+  sessionId         String   @map("session_id")
+  jid               String
+  nome              String
+  descricao         String?
+  participantCount  Int      @default(0) @map("participant_count")
+  isCommunity       Boolean  @default(false) @map("is_community")
+  parentCommunityJid String? @map("parent_community_jid")
+  inviteLink        String?  @map("invite_link")
+  raw               Json?
+  lastSyncedAt      DateTime? @map("last_synced_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  tenant            Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session           WhatsAppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  members           GroupLead[]
+  @@unique([tenantId, sessionId, jid])
+  @@index([tenantId])
+  @@index([tenantId, isCommunity])
+  @@map("whatsapp_groups")
+}
+
+model Lead {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  telefone    String
+  nome        String
+  jid         String?
+  lid         String?
+  tags        String[]
+  contactId   String?  @map("contact_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships LeadListMember[]
+  groups      GroupLead[]
+  @@unique([tenantId, telefone])
+  @@index([tenantId])
+  @@map("leads")
+}
+
+model LeadList {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  nome        String
+  descricao   String?
+  motivo      String?
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members     LeadListMember[]
+  @@unique([tenantId, nome])
+  @@index([tenantId])
+  @@map("lead_lists")
+}
+
+model LeadListMember {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  listId      String   @map("list_id")
+  leadId      String   @map("lead_id")
+  sourceType  String?  @map("source_type")
+  sourceName  String?  @map("source_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  list        LeadList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  lead        Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  @@unique([listId, leadId])
+  @@index([tenantId])
+  @@map("lead_list_members")
+}
+
+model GroupLead {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  groupId   String   @map("group_id")
+  leadId    String   @map("lead_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group     WhatsAppGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  lead      Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  @@unique([groupId, leadId])
+  @@index([tenantId])
+  @@map("group_leads")
 }
 
 model User {

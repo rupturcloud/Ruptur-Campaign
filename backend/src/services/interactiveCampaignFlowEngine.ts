@@ -428,18 +428,23 @@ export const interactiveCampaignFlowEngine = {
       case 'text':
       case 'action':
         const textContent = config.content || config.message || '';
-        const personalizedText = this.replaceVariables(textContent, variables);
-        messagePayload = { text: personalizedText };
+        const rawHeader = this.replaceVariables(config.headerText || '', variables).trim();
+        const baseText = this.replaceVariables(textContent, variables);
+        const personalizedText = rawHeader ? (baseText ? `*${rawHeader}*\n\n${baseText}` : `*${rawHeader}*`) : baseText;
+        messagePayload = { text: personalizedText, ...(rawHeader ? { headerText: rawHeader } : {}) };
         console.log(`📤 Sending text to ${contactPhone}: "${personalizedText.substring(0, 50)}..."`);
         break;
 
       case 'image':
         const imageUrl = config.mediaUrl;
         const imageCaption = config.caption || '';
-        const personalizedImageCaption = this.replaceVariables(imageCaption, variables);
+        const rawImgHeader = this.replaceVariables(config.headerText || '', variables).trim();
+        const baseImgCaption = this.replaceVariables(imageCaption, variables);
+        const personalizedImageCaption = rawImgHeader ? (baseImgCaption ? `*${rawImgHeader}*\n\n${baseImgCaption}` : `*${rawImgHeader}*`) : baseImgCaption;
         messagePayload = {
           image: { url: imageUrl },
           caption: personalizedImageCaption || undefined,
+          ...(rawImgHeader ? { headerText: rawImgHeader } : {}),
         };
         console.log(`📤 Sending image to ${contactPhone}`);
         break;
@@ -447,10 +452,13 @@ export const interactiveCampaignFlowEngine = {
       case 'video':
         const videoUrl = config.mediaUrl;
         const videoCaption = config.caption || '';
-        const personalizedVideoCaption = this.replaceVariables(videoCaption, variables);
+        const rawVidHeader = this.replaceVariables(config.headerText || '', variables).trim();
+        const baseVidCaption = this.replaceVariables(videoCaption, variables);
+        const personalizedVideoCaption = rawVidHeader ? (baseVidCaption ? `*${rawVidHeader}*\n\n${baseVidCaption}` : `*${rawVidHeader}*`) : baseVidCaption;
         messagePayload = {
           video: { url: videoUrl },
           caption: personalizedVideoCaption || undefined,
+          ...(rawVidHeader ? { headerText: rawVidHeader } : {}),
         };
         console.log(`📤 Sending video to ${contactPhone}`);
         break;

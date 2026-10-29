@@ -269,7 +269,7 @@ class CampaignSchedulerService {
       const alreadyProcessed = await prisma.campaignMessage.findFirst({
         where: {
           campaignId: campaign.id,
-          contactId: message.contactId,
+          ...(message.contactId ? { contactId: message.contactId } : { contactPhone: message.contactPhone }),
           status: 'SENT'
         }
       });
@@ -293,7 +293,7 @@ class CampaignSchedulerService {
 
       // Buscar dados do contato para variáveis dinâmicas usando ContactService
       const contactsResponse = await ContactService.getContacts();
-      const contact = contactsResponse.contacts.find((c: any) => c.id === message.contactId);
+      const contact = message.contactId ? contactsResponse.contacts.find((c: any) => c.id === message.contactId) : undefined;
 
       console.log(`🔍 CONTACT FOUND:`, contact);
 
@@ -605,6 +605,14 @@ class CampaignSchedulerService {
     };
   }
 
+  private formatWithHeader(text?: string, headerText?: string): string {
+    const base = typeof text === 'string' ? text : '';
+    const cleanHeader = typeof headerText === 'string' ? headerText.trim().replace(/^\*+|\*+$/g, '').trim() : '';
+    if (!cleanHeader) return base;
+    if (base.startsWith(`*${cleanHeader}*`)) return base;
+    return base.trim() ? `*${cleanHeader}*\n\n${base}` : `*${cleanHeader}*`;
+  }
+
   private async sendMessageViaUazapi(instanceName: string, phone: string, messageType: string, content: any, contactData?: any, tenantId?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       await uazapiService.session(instanceName, tenantId);
@@ -617,13 +625,14 @@ class CampaignSchedulerService {
             this.processVariables(content.composition || content, contactData || {}), tenantId);
           break;
         case 'text':
-          result = await sendForTenant(instanceName, phone, { text: content.text });
+          result = await sendForTenant(instanceName, phone, { text: this.formatWithHeader(content.text, content.headerText), headerText: content.headerText });
           break;
 
         case 'image':
           result = await sendForTenant(instanceName, phone, {
             image: { url: content.url },
-            caption: content.caption || '',
+            caption: this.formatWithHeader(content.caption || '', content.headerText),
+            headerText: content.headerText,
             fileName: 'imagem.png'
           });
           break;
@@ -631,7 +640,8 @@ class CampaignSchedulerService {
         case 'video':
           result = await sendForTenant(instanceName, phone, {
             video: { url: content.url },
-            caption: content.caption || '',
+            caption: this.formatWithHeader(content.caption || '', content.headerText),
+            headerText: content.headerText,
             fileName: 'video.mp4'
           });
           break;
@@ -647,7 +657,8 @@ class CampaignSchedulerService {
           result = await sendForTenant(instanceName, phone, {
             document: { url: content.url },
             fileName: content.fileName || 'documento.pdf',
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText),
+            headerText: content.headerText
           });
           break;
 
@@ -741,13 +752,13 @@ class CampaignSchedulerService {
 
       switch (messageType) {
         case 'text':
-          result = await sendMessageViaEvolution(instanceName, phone, { text: content.text });
+          result = await sendMessageViaEvolution(instanceName, phone, { text: this.formatWithHeader(content.text, content.headerText) });
           break;
 
         case 'image':
           result = await sendMessageViaEvolution(instanceName, phone, {
             image: { url: content.url },
-            caption: content.caption || '',
+            caption: this.formatWithHeader(content.caption || '', content.headerText),
             fileName: 'imagem.png'
           });
           break;
@@ -755,7 +766,7 @@ class CampaignSchedulerService {
         case 'video':
           result = await sendMessageViaEvolution(instanceName, phone, {
             video: { url: content.url },
-            caption: content.caption || '',
+            caption: this.formatWithHeader(content.caption || '', content.headerText),
             fileName: 'video.mp4'
           });
           break;
@@ -771,7 +782,7 @@ class CampaignSchedulerService {
           result = await sendMessageViaEvolution(instanceName, phone, {
             document: { url: content.url },
             fileName: content.fileName || 'documento.pdf',
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText)
           });
           break;
 
@@ -866,20 +877,20 @@ class CampaignSchedulerService {
 
       switch (messageType) {
         case 'text':
-          result = await sendMessageViaQuepasa(sessionName, phone, { text: content.text }, sessionToken);
+          result = await sendMessageViaQuepasa(sessionName, phone, { text: this.formatWithHeader(content.text, content.headerText) }, sessionToken);
           break;
 
         case 'image':
           result = await sendMessageViaQuepasa(sessionName, phone, {
             image: { url: content.url },
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText)
           }, sessionToken);
           break;
 
         case 'video':
           result = await sendMessageViaQuepasa(sessionName, phone, {
             video: { url: content.url },
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText)
           }, sessionToken);
           break;
 
@@ -893,7 +904,7 @@ class CampaignSchedulerService {
           result = await sendMessageViaQuepasa(sessionName, phone, {
             document: { url: content.url },
             fileName: content.fileName || 'documento.pdf',
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText)
           }, sessionToken);
           break;
 
@@ -988,20 +999,20 @@ class CampaignSchedulerService {
 
       switch (messageType) {
         case 'text':
-          result = await sendMessage(sessionName, phone, { text: content.text }, validatedChatId);
+          result = await sendMessage(sessionName, phone, { text: this.formatWithHeader(content.text, content.headerText) }, validatedChatId);
           break;
 
         case 'image':
           result = await sendMessage(sessionName, phone, {
             image: { url: content.url },
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText)
           }, validatedChatId);
           break;
 
         case 'video':
           result = await sendMessage(sessionName, phone, {
             video: { url: content.url },
-            caption: content.caption || ''
+            caption: this.formatWithHeader(content.caption || '', content.headerText)
           }, validatedChatId);
           break;
 

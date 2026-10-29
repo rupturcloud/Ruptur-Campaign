@@ -44,6 +44,12 @@ export const settingsValidation = [
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('URL Uazapi inválida');
     return true;
   }),
+  body('uazapiUrl').optional().custom(value => {
+    if (!value) return true;
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('URL Uazapi inválida');
+    return true;
+  }),
   body('wahaHost').optional().custom((value) => {
     if (!value || value === '') return true;
     if (!/^https?:\/\/.+/.test(value)) {
@@ -134,7 +140,9 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
       chatwootAccountId: tenantSettings?.chatwootAccountId || null,
       chatwootApiToken: tenantSettings?.chatwootApiToken || null,
       perfexUrl: tenantSettings?.perfexUrl || null,
-      perfexToken: tenantSettings?.perfexToken || null
+      perfexToken: tenantSettings?.perfexToken || null,
+      uazapiUrl: (tenantSettings as any)?.uazapiUrl || globalSettings.uazapiHost || 'https://ruptur001.uazapi.com',
+      uazapiAdminToken: (tenantSettings as any)?.uazapiAdminToken || (globalSettings as any).uazapiAdminToken || null
     };
 
     res.json(combinedSettings);
@@ -169,13 +177,15 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
       return res.status(400).json({ errors: errors.array() });
     }
 
-    if (req.body.uazapiHost !== undefined && req.user?.role !== 'SUPERADMIN') return res.status(403).json({ error: 'Somente Superadmin pode alterar o servidor padrão Uazapi' });
+    // Permitir ADMIN e SUPERADMIN configurarem a conta Uazapi
 
-    const { uazapiHost, wahaHost, wahaApiKey, evolutionHost, evolutionApiKey, quepasaUrl, quepasaLogin, quepasaPassword, companyName, pageTitle, openaiApiKey, groqApiKey, chatwootUrl, chatwootAccountId, chatwootApiToken, perfexUrl, perfexToken, tenantId } = req.body;
+    const { uazapiHost, uazapiUrl, uazapiAdminToken, wahaHost, wahaApiKey, evolutionHost, evolutionApiKey, quepasaUrl, quepasaLogin, quepasaPassword, companyName, pageTitle, openaiApiKey, groqApiKey, chatwootUrl, chatwootAccountId, chatwootApiToken, perfexUrl, perfexToken, tenantId } = req.body;
+    const effectiveUazapiHost = uazapiUrl !== undefined ? uazapiUrl : uazapiHost;
 
     // Atualizar configurações globais (WAHA, Evolution, Quepasa são globais)
     const globalSettings = await settingsService.updateSettings({
-      uazapiHost,
+      uazapiHost: effectiveUazapiHost,
+      uazapiAdminToken,
       wahaHost,
       wahaApiKey,
       evolutionHost,
@@ -196,7 +206,7 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
 
     // Atualizar configurações do tenant (APIs de IA, Chatwoot e Perfex)
     let tenantSettings = null;
-    if (effectiveTenantId && (openaiApiKey !== undefined || groqApiKey !== undefined || chatwootUrl !== undefined || chatwootAccountId !== undefined || chatwootApiToken !== undefined || perfexUrl !== undefined || perfexToken !== undefined)) {
+    if (effectiveTenantId && (openaiApiKey !== undefined || groqApiKey !== undefined || chatwootUrl !== undefined || chatwootAccountId !== undefined || chatwootApiToken !== undefined || perfexUrl !== undefined || perfexToken !== undefined || effectiveUazapiHost !== undefined || uazapiAdminToken !== undefined)) {
       tenantSettings = await tenantSettingsService.updateTenantSettings(effectiveTenantId, {
         openaiApiKey,
         groqApiKey,
@@ -204,7 +214,9 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
         chatwootAccountId,
         chatwootApiToken,
         perfexUrl,
-        perfexToken
+        perfexToken,
+        uazapiUrl: effectiveUazapiHost,
+        uazapiAdminToken
       });
     }
 
@@ -217,7 +229,9 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
       chatwootAccountId: tenantSettings?.chatwootAccountId || null,
       chatwootApiToken: tenantSettings?.chatwootApiToken || null,
       perfexUrl: tenantSettings?.perfexUrl || null,
-      perfexToken: tenantSettings?.perfexToken || null
+      perfexToken: tenantSettings?.perfexToken || null,
+      uazapiUrl: (tenantSettings as any)?.uazapiUrl || globalSettings.uazapiHost || 'https://ruptur001.uazapi.com',
+      uazapiAdminToken: (tenantSettings as any)?.uazapiAdminToken || (globalSettings as any).uazapiAdminToken || null
     };
 
     res.json({

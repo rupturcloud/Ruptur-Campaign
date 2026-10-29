@@ -6,6 +6,15 @@ const endpoints: Record<string, string> = {
   location: '/send/location', payment: '/send/request-payment', pix_button: '/send/pix-button', status: '/send/status',
 };
 for (const type of ['image', 'video', 'videoplay', 'document', 'audio', 'myaudio', 'ptt', 'ptv', 'sticker']) endpoints[type] = '/send/media';
+
+function resolveMediaUrl(val: unknown): any {
+  if (typeof val === 'string' && val.startsWith('/')) {
+    const base = process.env.APP_URL || 'https://ruptur-campaign.ruptur.cloud';
+    try { return new URL(val, base).toString(); } catch { return val; }
+  }
+  return val;
+}
+
 function validate(value: any, schema: any, path: string): void {
   const fail = () => { throw new Error(`Campo Uazapi inválido: ${path}`); };
   if (schema.type === 'object') {
@@ -27,40 +36,72 @@ function validate(value: any, schema: any, path: string): void {
   if (schema.minimum !== undefined && value < schema.minimum) fail();
   if (schema.maximum !== undefined && value > schema.maximum) fail();
 }
+
 export function buildUazapiComposition(number: string, composition: any) {
   if (!composition || typeof composition !== 'object' || Array.isArray(composition)) throw new Error('Composição Uazapi inválida');
-  const { type, statusType, mediaType, buttons, number: ignoredNumber, recipients: ignoredRecipients, ...fields } = composition;
+  const { type, statusType, mediaType, buttons, number: ignoredNumber, recipients: ignoredRecipients, ...rawFields } = composition;
+  const fields: any = { ...rawFields };
   const endpoint = Object.hasOwn(endpoints, type) ? endpoints[type] : undefined;
   if (!endpoint) throw new Error('Tipo de composição Uazapi não suportado');
+
+  if (fields.file) fields.file = resolveMediaUrl(fields.file);
+  if (fields.imageButton) fields.imageButton = resolveMediaUrl(fields.imageButton);
+
   const structuredChoices = Array.isArray(buttons) ? buttons.map((button: any) => {
     if (!button?.text?.trim() || !button?.value?.trim()) throw new Error('Todo botão precisa de texto e destino');
     return `${button.text.trim()}|${button.value.trim()}`;
   }) : undefined;
-  // Header handling for buttons, text and media
+
+  // Header handling for buttons, lists, polls, text, media, and carousel
   let formattedText = fields.text;
   const header = fields.headerText || fields.title;
   if (header && typeof header === 'string' && header.trim()) {
-    const cleanHeader = header.trim();
-    if (endpoint === '/send/menu') {
+    const cleanHeader = header.trim().replace(/^\*+|\*+$/g, '').trim();
+    if (['/send/menu', '/send/text', '/send/media', '/send/carousel'].includes(endpoint) && cleanHeader) {
       fields.headerText = cleanHeader;
       fields.title = fields.title || cleanHeader;
-    } else if (endpoint === '/send/text' || endpoint === '/send/media') {
-      fields.headerText = cleanHeader;
-      fields.title = cleanHeader;
-      if (typeof formattedText === 'string' && !formattedText.startsWith(`*${cleanHeader}*`)) {
-        formattedText = formattedText.trim() ? `*${cleanHeader}*\n\n${formattedText}` : `*${cleanHeader}*`;
+      const baseText = typeof formattedText === 'string' ? formattedText : '';
+      if (!baseText.startsWith(`*${cleanHeader}*`)) {
+        formattedText = baseText.trim() ? `*${cleanHeader}*\n\n${baseText}` : `*${cleanHeader}*`;
       }
     }
   }
 
+  // Footer handling for text and media (menu already supports native footerText)
+  if (['/send/text', '/send/media'].includes(endpoint) && typeof fields.footerText === 'string' && fields.footerText.trim()) {
+    const cleanFooter = fields.footerText.trim();
+    const baseText = typeof formattedText === 'string' ? formattedText : '';
+    if (!baseText.endsWith(`_${cleanFooter}_`)) {
+      formattedText = baseText.trim() ? `${baseText}\n\n_${cleanFooter}_` : `_${cleanFooter}_`;
+    }
+  }
+
+  if (endpoint === '/send/carousel' && Array.isArray(fields.carousel)) {
+    fields.carousel = fields.carousel.map((card: any) => {
+      if (!card || typeof card !== 'object') return card;
+      const updatedCard: any = { ...card };
+      if (updatedCard.image) updatedCard.image = resolveMediaUrl(updatedCard.image);
+      if (updatedCard.video) updatedCard.video = resolveMediaUrl(updatedCard.video);
+      if (updatedCard.document) updatedCard.document = resolveMediaUrl(updatedCard.document);
+      const cardHeader = (updatedCard.headerText || updatedCard.title || '').trim().replace(/^\*+|\*+$/g, '').trim();
+      if (cardHeader) {
+        const baseCardText = typeof updatedCard.text === 'string' ? updatedCard.text : '';
+        if (!baseCardText.startsWith(`*${cardHeader}*`)) {
+          updatedCard.text = baseCardText.trim() ? `*${cardHeader}*\n\n${baseCardText}` : `*${cardHeader}*`;
+        }
+      }
+      return updatedCard;
+    });
+  }
+
   const payload: any = endpoint === '/send/status'
     ? { ...fields, type: statusType || mediaType || 'text', recipients: [number] }
-    : { ...fields, text: formattedText, number, async: false, track_source: 'ruptur-campaign',
+    : { ...fields, ...(formattedText !== undefined ? { text: formattedText } : {}), number, async: false, track_source: 'ruptur-campaign',
         ...(['/send/menu', '/send/media'].includes(endpoint) ? { type } : {}),
         ...(structuredChoices ? { choices: structuredChoices } : {}) };
   validate(payload, (schemas as any)[endpoint], 'mensagem');
-  if (endpoint === '/send/menu' && (!payload.text.trim() || !payload.choices.length || payload.choices.some((v: string) => !v.trim()))) throw new Error('Informe o texto e as opções do menu');
-  if (endpoint === '/send/carousel' && (!payload.text.trim() || !payload.carousel.length || payload.carousel.some((c: any) => !c.text.trim() || !c.buttons.length))) throw new Error('Informe o texto, cartões e botões do carrossel');
+  if (endpoint === '/send/menu' && (!payload.text?.trim() || !payload.choices?.length || payload.choices.some((v: string) => !v.trim()))) throw new Error('Informe o texto e as opções do menu');
+  if (endpoint === '/send/carousel' && (!payload.text?.trim() || !payload.carousel?.length || payload.carousel.some((c: any) => !c.text?.trim() || !c.buttons?.length))) throw new Error('Informe o texto, cartões e botões do carrossel');
   if (type === 'location' && (Math.abs(payload.latitude) > 90 || Math.abs(payload.longitude) > 180)) throw new Error('Coordenadas inválidas');
   if (type === 'payment' && payload.amount <= 0) throw new Error('Valor da cobrança deve ser positivo');
   if (type === 'pix_button' && !['CPF', 'CNPJ', 'PHONE', 'EMAIL', 'EVP'].includes(payload.pixType)) throw new Error('Tipo de chave PIX inválido');

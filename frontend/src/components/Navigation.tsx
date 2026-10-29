@@ -37,6 +37,15 @@ export function Navigation() {
       )
     },
     {
+      path: '/grupos',
+      label: 'Grupos',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-4-4h-1m-4 6H3v-2a4 4 0 014-4h4a4 4 0 014 4v2zm-2-10a3 3 0 11-6 0 3 3 0 016 0zm7 1a2 2 0 10-4 0 2 2 0 004 0z" />
+        </svg>
+      )
+    },
+    {
       path: '/campanhas/interativa',
       label: 'Campanha Interativa',
       icon: (

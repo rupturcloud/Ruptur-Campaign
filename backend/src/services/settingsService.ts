@@ -23,7 +23,8 @@ export class SettingsService {
         settings = await prisma.globalSettings.create({
           data: {
             singleton: true,
-            uazapiHost: '',
+            uazapiHost: 'https://ruptur001.uazapi.com',
+            uazapiAdminToken: '',
         wahaHost: '',
             wahaApiKey: '',
             evolutionHost: '',
@@ -42,7 +43,8 @@ export class SettingsService {
       console.error('Error getting settings:', error);
       // Retornar configurações padrão se houver erro
       return {
-        uazapiHost: '',
+        uazapiHost: 'https://ruptur001.uazapi.com',
+        uazapiAdminToken: '',
         wahaHost: '',
         wahaApiKey: '',
         evolutionHost: '',
@@ -61,6 +63,7 @@ export class SettingsService {
 
   async updateSettings(data: {
     uazapiHost?: string;
+    uazapiAdminToken?: string;
     wahaHost?: string;
     wahaApiKey?: string;
     evolutionHost?: string;
@@ -84,6 +87,7 @@ export class SettingsService {
           where: { id: settings.id },
           data: {
             uazapiHost: data.uazapiHost !== undefined ? data.uazapiHost : settings.uazapiHost,
+            uazapiAdminToken: data.uazapiAdminToken !== undefined ? data.uazapiAdminToken : (settings as any).uazapiAdminToken,
             wahaHost: data.wahaHost !== undefined ? data.wahaHost : settings.wahaHost,
             wahaApiKey: data.wahaApiKey !== undefined ? data.wahaApiKey : settings.wahaApiKey,
             evolutionHost: data.evolutionHost !== undefined ? data.evolutionHost : settings.evolutionHost,
@@ -103,7 +107,8 @@ export class SettingsService {
         settings = await prisma.globalSettings.create({
           data: {
             singleton: true,
-            uazapiHost: data.uazapiHost || '',
+            uazapiHost: data.uazapiHost || 'https://ruptur001.uazapi.com',
+            uazapiAdminToken: data.uazapiAdminToken || '',
             wahaHost: data.wahaHost || '',
             wahaApiKey: data.wahaApiKey || '',
             evolutionHost: data.evolutionHost || '',

@@ -55,6 +55,9 @@
       },
       "title": {
         "type": "string"
+      },
+      "footerText": {
+        "type": "string"
       }
     },
     "required": [
@@ -131,6 +134,9 @@
         "type": "string"
       },
       "title": {
+        "type": "string"
+      },
+      "footerText": {
         "type": "string"
       }
     },
@@ -431,6 +437,15 @@
                   }
                 }
               }
+            },
+            "headerText": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "footerText": {
+              "type": "string"
             }
           },
           "required": [
@@ -464,6 +479,15 @@
         "type": "string"
       },
       "track_id": {
+        "type": "string"
+      },
+      "headerText": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "footerText": {
         "type": "string"
       }
     },

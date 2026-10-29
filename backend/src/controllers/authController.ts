@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { AuthenticatedRequest } from '../middleware/auth';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
@@ -149,6 +150,41 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       success: false,
       message: 'Erro interno do servidor'
     });
+  }
+};
+
+// SSO usado somente pelo módulo embutido no Mega. A chamada é servidor-a-servidor;
+// o segredo nunca chega ao navegador e o tenant é resolvido por slug controlado.
+export const megaSso = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const expected = process.env.RUPTUR_SSO_SECRET;
+    const presented = req.header('X-Ruptur-SSO-Secret');
+    if (!expected || !presented || expected.length !== presented.length ||
+        !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(presented))) {
+      res.status(401).json({ success: false, message: 'SSO não autorizado' });
+      return;
+    }
+    const { email, nome, tenantSlug, role } = req.body || {};
+    if (typeof email !== 'string' || typeof nome !== 'string' || typeof tenantSlug !== 'string' ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[a-z0-9-]{1,60}$/.test(tenantSlug)) {
+      res.status(400).json({ success: false, message: 'Contexto SSO inválido' });
+      return;
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
+    if (!tenant || !tenant.active) {
+      res.status(403).json({ success: false, message: 'Tenant do Mega não encontrado ou inativo' });
+      return;
+    }
+    const safeRole = ['ADMIN', 'USER'].includes(role) ? role : 'USER';
+    const user = await prisma.user.upsert({
+      where: { email: email.toLowerCase() },
+      update: { nome: nome.slice(0, 160), role: safeRole, tenantId: tenant.id, ativo: true, ultimoLogin: new Date() },
+      create: { nome: nome.slice(0, 160), email: email.toLowerCase(), senha: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12), role: safeRole, tenantId: tenant.id, ativo: true, ultimoLogin: new Date() }
+    });
+    res.json({ success: true, data: { token: generateToken(user.id, user.email, user.role, tenant.id), user: sanitizeUser(user), tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name } } });
+  } catch (error) {
+    console.error('Erro no SSO do Mega:', error);
+    res.status(500).json({ success: false, message: 'Erro interno no SSO' });
   }
 };
 

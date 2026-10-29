@@ -16,6 +16,9 @@ interface Settings {
   chatwootApiToken?: string;
   perfexUrl?: string;
   perfexToken?: string;
+  uazapiUrl?: string;
+  uazapiHost?: string;
+  uazapiAdminToken?: string;
 }
 
 const settingsSchema = z.object({
@@ -26,6 +29,8 @@ const settingsSchema = z.object({
   chatwootApiToken: z.string().optional(),
   perfexUrl: z.string().optional(),
   perfexToken: z.string().optional(),
+  uazapiUrl: z.string().optional(),
+  uazapiAdminToken: z.string().optional(),
 });
 
 type SettingsFormData = z.infer<typeof settingsSchema>;
@@ -33,7 +38,8 @@ type SettingsFormData = z.infer<typeof settingsSchema>;
 export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeModal, setActiveModal] = useState<'openai' | 'groq' | 'chatwoot' | 'perfex' | null>(null);
+  const [syncingUazapi, setSyncingUazapi] = useState(false);
+  const [activeModal, setActiveModal] = useState<'openai' | 'groq' | 'chatwoot' | 'perfex' | 'uazapi' | null>(null);
   const { user } = useAuth();
 
   // Helper para fazer requisições autenticadas
@@ -54,11 +60,11 @@ export function SettingsPage() {
     });
   };
 
-
   const {
     register,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -70,7 +76,6 @@ export function SettingsPage() {
   useEffect(() => {
     loadSettings();
 
-    // Listen for tenant changes from header selector
     const handleTenantChange = () => {
       loadSettings();
     };
@@ -103,6 +108,8 @@ export function SettingsPage() {
         setValue('chatwootApiToken', data.chatwootApiToken || '');
         setValue('perfexUrl', data.perfexUrl || '');
         setValue('perfexToken', data.perfexToken || '');
+        setValue('uazapiUrl', data.uazapiUrl || data.uazapiHost || 'https://ruptur001.uazapi.com');
+        setValue('uazapiAdminToken', data.uazapiAdminToken || '');
       }
     } catch (error) {
       console.error('Erro ao carregar configurações:', error);
@@ -112,9 +119,38 @@ export function SettingsPage() {
     }
   };
 
+  const handleSyncUazapi = async (overrideUrl?: string, overrideToken?: string) => {
+    setSyncingUazapi(true);
+    try {
+      const bodyPayload: any = {};
+      if (overrideUrl) bodyPayload.uazapiUrl = overrideUrl;
+      if (overrideToken) bodyPayload.uazapiAdminToken = overrideToken;
+      if (user?.role === 'SUPERADMIN') {
+        const selectedTenantId = localStorage.getItem('superadmin_selected_tenant');
+        if (selectedTenantId) bodyPayload.tenantId = selectedTenantId;
+      }
+
+      const response = await authenticatedFetch('/api/waha/sessions/uazapi/sync', {
+        method: 'POST',
+        body: JSON.stringify(bodyPayload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao sincronizar instâncias Uazapi');
+      }
+      toast.success(
+        `Sincronização concluída! ${data.imported || 0} nova(s) instância(s) importada(s) e ${data.updated || 0} atualizada(s).`
+      );
+    } catch (error: any) {
+      toast.error(error?.message || 'Erro ao sincronizar instâncias Uazapi');
+    } finally {
+      setSyncingUazapi(false);
+    }
+  };
+
   const onSubmit = async (data: SettingsFormData) => {
     try {
-      let requestData = data;
+      let requestData: any = { ...data };
 
       if (user?.role === 'SUPERADMIN') {
         const selectedTenantId = localStorage.getItem('superadmin_selected_tenant');
@@ -129,10 +165,13 @@ export function SettingsPage() {
       });
 
       if (response.ok) {
-        const responseData = await response.json();
         toast.success('Configurações de integração salvas com sucesso');
+        const wasUazapiModal = activeModal === 'uazapi';
         setActiveModal(null);
         await loadSettings();
+        if (wasUazapiModal && data.uazapiAdminToken) {
+          await handleSyncUazapi(data.uazapiUrl, data.uazapiAdminToken);
+        }
       } else {
         const errorData = await response.json();
         toast.error(errorData.error || 'Erro ao salvar configurações de integração');
@@ -143,12 +182,13 @@ export function SettingsPage() {
     }
   };
 
-  const removeIntegration = async (type: 'openai' | 'groq' | 'chatwoot' | 'perfex') => {
+  const removeIntegration = async (type: 'openai' | 'groq' | 'chatwoot' | 'perfex' | 'uazapi') => {
     const integrationNames = {
       openai: 'OpenAI',
       groq: 'Groq',
       chatwoot: 'Chatwoot',
-      perfex: 'Perfex CRM'
+      perfex: 'Perfex CRM',
+      uazapi: 'Uazapi'
     };
 
     if (!confirm(`Tem certeza que deseja remover a integração com ${integrationNames[type]}?`)) {
@@ -169,6 +209,8 @@ export function SettingsPage() {
       } else if (type === 'perfex') {
         requestData.perfexUrl = '';
         requestData.perfexToken = '';
+      } else if (type === 'uazapi') {
+        requestData.uazapiAdminToken = '';
       }
 
       if (user?.role === 'SUPERADMIN') {
@@ -197,7 +239,6 @@ export function SettingsPage() {
     }
   };
 
-
   if (loading) {
     return (
       <div className="p-6">
@@ -217,6 +258,58 @@ export function SettingsPage() {
 
       <div className="p-6">
         <div className="max-w-4xl mx-auto">
+          {/* Integração Uazapi */}
+          <div className="bg-white rounded-lg shadow p-6 mb-6 border-l-4 border-emerald-600">
+            <h2 className="text-lg font-semibold mb-2 text-gray-900">
+              📱 Integração Conta Uazapi (WhatsApp)
+            </h2>
+            <p className="text-gray-600 mb-6 text-sm">
+              Configure a URL e o Admin Token da sua conta Uazapi para sincronizar e importar automaticamente todas as instâncias disponíveis para uso nas campanhas
+            </p>
+
+            <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+                    <span className="text-emerald-700 font-semibold text-lg">📱</span>
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-gray-900">Conta Uazapi API</h3>
+                    <p className="text-sm text-gray-500">
+                      {settings?.uazapiUrl || settings?.uazapiHost || 'https://ruptur001.uazapi.com'} — Sincronização de instâncias
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                    settings?.uazapiAdminToken
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {settings?.uazapiAdminToken ? 'Configurado' : 'Não configurado'}
+                  </span>
+                  {settings?.uazapiAdminToken && (
+                    <button
+                      type="button"
+                      onClick={() => handleSyncUazapi()}
+                      disabled={syncingUazapi}
+                      className="px-3 py-1 bg-emerald-100 text-emerald-800 text-sm font-medium rounded hover:bg-emerald-200 disabled:opacity-50"
+                    >
+                      {syncingUazapi ? '🔄 Sincronizando...' : '🔄 Sincronizar Instâncias'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal('uazapi')}
+                    className="px-3 py-1 bg-emerald-700 text-white text-sm rounded hover:bg-emerald-800"
+                  >
+                    Configurar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold mb-6 text-gray-900">
               🔗 Integrações de IA
@@ -224,7 +317,6 @@ export function SettingsPage() {
             <p className="text-gray-600 mb-6">
               Configure as chaves de API para usar inteligência artificial nas campanhas
             </p>
-
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* OpenAI Button */}
@@ -370,8 +462,83 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Modais de Integração */}
+      {/* Modal Uazapi */}
+      {activeModal === 'uazapi' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">📱 Configurar Conta Uazapi</h3>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
 
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <label htmlFor="uazapiUrl" className="block text-sm font-medium text-gray-700 mb-1">
+                  URL do Servidor Uazapi *
+                </label>
+                <input
+                  id="uazapiUrl"
+                  type="url"
+                  {...register('uazapiUrl')}
+                  placeholder="https://ruptur001.uazapi.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Endereço do servidor da sua conta Uazapi (ex: https://ruptur001.uazapi.com)
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="uazapiAdminToken" className="block text-sm font-medium text-gray-700 mb-1">
+                  Admin Token da Conta (admintoken) *
+                </label>
+                <input
+                  id="uazapiAdminToken"
+                  type="password"
+                  {...register('uazapiAdminToken')}
+                  placeholder="Informe o admintoken da conta Uazapi..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  O Admin Token permite listar e sincronizar automaticamente todas as instâncias criadas na sua conta Uazapi.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 text-sm"
+                >
+                  Cancelar
+                </button>
+                {settings?.uazapiAdminToken && (
+                  <button
+                    type="button"
+                    onClick={() => removeIntegration('uazapi')}
+                    disabled={isSubmitting}
+                    className="px-4 py-2 text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50 text-sm"
+                  >
+                    Remover
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting || syncingUazapi}
+                  className="flex-1 px-4 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium"
+                >
+                  {isSubmitting || syncingUazapi ? 'Salvando e Sincronizando...' : 'Salvar e Sincronizar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal OpenAI */}
       {activeModal === 'openai' && (

@@ -31,6 +31,7 @@ import webhookRoutes from './routes/webhookRoutes';
 import incomingWebhookRoutes from './routes/incomingWebhookRoutes';
 import interactiveCampaignRoutes from './routes/interactiveCampaignRoutes';
 import httpProxyRoutes from './routes/httpProxyRoutes';
+import groupsRoutes from './routes/groups';
 // import integrationsRoutes from './routes/integrations';
 // import cacheRoutes from './routes/cache';
 import { authMiddleware } from './middleware/auth';
@@ -171,6 +172,7 @@ app.use('/api/media', authMiddleware, mediaRoutes); // Upload de arquivos de mí
 app.use('/api/connections', authMiddleware, connectionRoutes); // Interactive campaigns - Connections
 app.use('/api/interactive-campaigns', authMiddleware, interactiveCampaignRoutes); // Interactive campaigns
 app.use('/api/http-proxy', authMiddleware, httpProxyRoutes); // HTTP REST proxy to avoid CORS
+app.use('/api/groups', authMiddleware, groupsRoutes);
 app.use('/api', authMiddleware, mockRoutes);
 
 server.listen(PORT, () => {

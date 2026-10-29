@@ -109,6 +109,13 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     // Sempre usar o tenantId do token (mesmo para SUPERADMIN quando tem empresa selecionada)
     const tenantId = req.tenantId;
 
+    if (tenantId) {
+      try {
+        await syncUazapiAccountForTenant(tenantId);
+      } catch {
+        // Ignorar silenciosamente se AdminToken ainda não estiver configurado
+      }
+    }
     const uazapiSessions = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI', ...(tenantId ? { tenantId } : {}) } });
     await Promise.all(uazapiSessions.map(async session => {
       try { await uazapiService.refresh(session); }
@@ -432,122 +439,157 @@ router.get('/sessions/:sessionName', authMiddleware, async (req: AuthenticatedRe
 });
 
 
-// Sincronizar instâncias UAZAPI da conta (importar novas instâncias automaticamente)
-router.post('/sessions/uazapi/sync', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const tenantId = req.tenantId;
-    if (!tenantId) return res.status(400).json({ error: 'TenantId é obrigatório' });
+// Helper para sincronizar instâncias UAZAPI da conta usando o Admin Token configurado
+async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string, overrideAdminToken?: string) {
+  const tenantSettings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
+  const globalSettings = await settingsService.getSettings();
+  const existingSession = await prisma.whatsAppSession.findFirst({
+    where: { provider: 'UAZAPI', tenantId }
+  });
 
-    // Buscar uma sessão UAZAPI existente do tenant para obter host/admintoken
-    const existingSession = await prisma.whatsAppSession.findFirst({
-      where: { provider: 'UAZAPI', tenantId }
-    });
-    if (!existingSession || !existingSession.uazapiHost || !existingSession.uazapiToken) {
-      return res.status(400).json({ error: 'Nenhuma instância Uazapi cadastrada para sincronizar. Cadastre ao menos uma instância manualmente primeiro.' });
+  const rawHost = (
+    overrideUrl ||
+    (tenantSettings as any)?.uazapiUrl ||
+    globalSettings?.uazapiHost ||
+    existingSession?.uazapiHost ||
+    'https://ruptur001.uazapi.com'
+  ).trim();
+
+  const adminToken = (
+    overrideAdminToken ||
+    (tenantSettings as any)?.uazapiAdminToken ||
+    (globalSettings as any)?.uazapiAdminToken ||
+    process.env.UAZAPI_ADMIN_TOKEN ||
+    ''
+  ).trim();
+
+  if (!adminToken) {
+    throw new Error('Configure o Admin Token da conta Uazapi em Configurações > Integração Uazapi para sincronizar as instâncias.');
+  }
+
+  const { normalizeUazapiHost, normalizeUazapiStatus, encryptUazapiToken, UazapiClient } = await import('../services/uazapiClient');
+  const host = normalizeUazapiHost(rawHost);
+
+  let instances: any[] = [];
+  const response = await fetch(`${host}/instance/all`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json', admintoken: adminToken },
+    signal: AbortSignal.timeout(15000)
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Admin Token inválido ou sem permissão no servidor ${host} (HTTP ${response.status}). Verifique o Admin Token em Configurações > Integração Uazapi.`);
+    }
+    throw new Error(`Servidor Uazapi retornou HTTP ${response.status} ao listar instâncias.`);
+  }
+
+  const data = await response.json();
+  instances = Array.isArray(data) ? data : (data.instances || data.data || []);
+
+  if (!Array.isArray(instances) || instances.length === 0) {
+    return { imported: 0, updated: 0, skipped: 0, instances: [] };
+  }
+
+  let imported = 0, updated = 0, skipped = 0;
+  const results: any[] = [];
+  const tenantPrefix = tenantId.substring(0, 8);
+
+  for (const inst of instances) {
+    const instId = String(inst.id || inst.instanceId || inst.name || '').trim();
+    const instName = String(inst.name || inst.instanceName || instId || '').trim();
+    const instToken = String(inst.token || inst.apiToken || inst.apikey || '').trim();
+    if (!instId || !instName || !instToken) {
+      skipped++;
+      continue;
     }
 
-    const { decryptUazapiToken, normalizeUazapiHost, normalizeUazapiStatus, encryptUazapiToken } = await import('../services/uazapiClient');
-    const host = existingSession.uazapiHost;
-    const token = decryptUazapiToken(existingSession.uazapiToken);
+    const identity = crypto.createHash('sha256').update(`${host}:${instId}`).digest('hex');
+    const displayName = instName.replace(/_[0-9a-f]{8}$/, '');
+    const sessionName = instName.includes(`_${tenantPrefix}`) ? instName : `${displayName}_${tenantPrefix}`;
 
-    // Chamar GET /instance/all com admintoken para listar todas as instâncias da conta
-    let instances: any[] = [];
-    try {
-      const response = await fetch(`${host}/instance/all`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', admintoken: token },
-        signal: AbortSignal.timeout(15000)
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      instances = Array.isArray(data) ? data : (data.instances || data.data || []);
-    } catch (err: any) {
-      // Tentar com token normal caso admintoken não funcione (instâncias individuais)
-      console.warn('⚠️ /instance/all falhou, tentando /instance/status:', err.message);
-      return res.status(502).json({ error: `Não foi possível listar instâncias da Uazapi: ${err.message}. Certifique-se de usar o admintoken.` });
-    }
-
-    if (!Array.isArray(instances) || instances.length === 0) {
-      return res.status(200).json({ imported: 0, updated: 0, skipped: 0, instances: [] });
-    }
-
-    let imported = 0, updated = 0, skipped = 0;
-    const results: any[] = [];
-
-    for (const inst of instances) {
-      const instId = inst.id || inst.instanceId || inst.name;
-      const instName = inst.name || inst.instanceName || instId;
-      if (!instId || !instName) { skipped++; continue; }
-
-      // Token individual da instância (pode ser diferente do admintoken)
-      const instToken = inst.token || inst.apiToken || token;
-
-      // Calcular identity hash (igual ao uazapiService.create)
-      const crypto = await import('crypto');
-      const identity = crypto.default.createHash('sha256').update(`${host}:${instId}`).digest('hex');
-
-      // Verificar se já existe
-      const existing = await prisma.whatsAppSession.findUnique({ where: { uazapiInstanceId: identity } });
-      if (existing) {
-        // Atualizar status
-        try {
-          const { UazapiClient } = await import('../services/uazapiClient');
-          const client = new UazapiClient(host, instToken);
-          const statusData = await client.request('/instance/status');
-          const statusUpdate = normalizeUazapiStatus(statusData);
-          await prisma.whatsAppSession.update({ where: { id: existing.id }, data: statusUpdate });
-          updated++;
-          results.push({ name: existing.displayName, action: 'updated', status: statusUpdate.status });
-        } catch {
-          skipped++;
-          results.push({ name: existing.displayName, action: 'skipped_error' });
-        }
-        continue;
+    // Procurar sessão existente por uazapiInstanceId ou por name
+    const existing = await prisma.whatsAppSession.findFirst({
+      where: {
+        OR: [
+          { uazapiInstanceId: identity },
+          { name: sessionName },
+          { name: instName }
+        ]
       }
+    });
 
-      // Importar nova instância
+    let statusInfo = normalizeUazapiStatus(inst);
+    try {
+      const client = new UazapiClient(host, instToken);
+      const statusData = await client.request('/instance/status');
+      statusInfo = normalizeUazapiStatus(statusData);
+    } catch {
+      // Fallback para o status retornado pelo /instance/all
+    }
+
+    if (existing) {
       try {
-        const { UazapiClient } = await import('../services/uazapiClient');
-        const client = new UazapiClient(host, instToken);
-        const statusData = await client.request('/instance/status');
-        const statusInfo = normalizeUazapiStatus(statusData);
-
-        const displayName = instName.replace(/_[0-9a-f]{8}$/, ''); // remover sufixo do tenantId se presente
-        const tenantPrefix = tenantId.substring(0, 8);
-        // Usar o nome original da instância se não tiver sufixo do tenant
-        const sessionName = instName.includes(`_${tenantPrefix}`) ? instName : `${displayName}_${tenantPrefix}`;
-
-        // Verificar se já existe por nome
-        const existingByName = await prisma.whatsAppSession.findUnique({ where: { name: sessionName } });
-        if (existingByName) { skipped++; results.push({ name: displayName, action: 'skipped_name_conflict' }); continue; }
-
-        await prisma.whatsAppSession.create({
+        await prisma.whatsAppSession.update({
+          where: { id: existing.id },
           data: {
-            name: sessionName,
-            displayName,
-            tenantId,
-            provider: 'UAZAPI',
             ...statusInfo,
             uazapiHost: host,
             uazapiToken: encryptUazapiToken(instToken),
-            uazapiInstanceId: identity,
-            interactiveCampaignEnabled: false
+            uazapiInstanceId: identity
           }
         });
-        imported++;
-        results.push({ name: displayName, action: 'imported', status: statusInfo.status });
+        updated++;
+        results.push({ name: existing.displayName || displayName, action: 'updated', status: statusInfo.status });
       } catch (err: any) {
-        console.warn(`⚠️ Erro ao importar instância ${instName}:`, err.message);
         skipped++;
-        results.push({ name: instName, action: 'error', error: err.message });
+        results.push({ name: existing.displayName || displayName, action: 'skipped_error', error: err.message });
       }
+      continue;
     }
 
-    console.log(`🔄 Sync UAZAPI concluído: ${imported} importadas, ${updated} atualizadas, ${skipped} ignoradas`);
-    return res.json({ imported, updated, skipped, instances: results });
+    try {
+      await prisma.whatsAppSession.create({
+        data: {
+          name: sessionName,
+          displayName,
+          tenantId,
+          provider: 'UAZAPI',
+          ...statusInfo,
+          uazapiHost: host,
+          uazapiToken: encryptUazapiToken(instToken),
+          uazapiInstanceId: identity,
+          interactiveCampaignEnabled: false
+        }
+      });
+      imported++;
+      results.push({ name: displayName, action: 'imported', status: statusInfo.status });
+    } catch (err: any) {
+      console.warn(`⚠️ Erro ao importar instância ${instName}:`, err.message);
+      skipped++;
+      results.push({ name: displayName, action: 'error', error: err.message });
+    }
+  }
+
+  console.log(`🔄 Sync UAZAPI concluído: ${imported} importadas, ${updated} atualizadas, ${skipped} ignoradas`);
+  return { imported, updated, skipped, instances: results };
+}
+
+// Sincronizar instâncias UAZAPI da conta (importar novas instâncias automaticamente)
+router.post('/sessions/uazapi/sync', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.role === 'SUPERADMIN' ? (req.body?.tenantId || req.tenantId) : req.tenantId;
+    if (!tenantId) return res.status(400).json({ error: 'TenantId é obrigatório' });
+
+    const result = await syncUazapiAccountForTenant(
+      tenantId,
+      req.body?.uazapiUrl || req.body?.uazapiHost,
+      req.body?.uazapiAdminToken
+    );
+    return res.json(result);
   } catch (error: any) {
     console.error('❌ Erro no sync UAZAPI:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(400).json({ error: error.message || 'Erro ao sincronizar instâncias Uazapi' });
   }
 });
 

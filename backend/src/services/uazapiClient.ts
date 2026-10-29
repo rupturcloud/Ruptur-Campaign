@@ -34,6 +34,7 @@ export class UazapiClient {
   }
   async request(endpoint: string, method = 'GET', payload?: unknown): Promise<any> {
     const allowed = ['GET /instance/status', 'POST /instance/connect', 'POST /instance/disconnect',
+      'POST /group/list', 'POST /group/info', 'GET /community/list',
       'POST /send/text', 'POST /send/media', 'POST /send/menu', 'POST /send/carousel',
       'POST /send/location-button', 'POST /send/contact', 'POST /send/location',
       'POST /send/request-payment', 'POST /send/pix-button', 'POST /send/status',
@@ -65,10 +66,30 @@ export class UazapiClient {
     if (!Array.isArray(data) || typeof data[0]?.isInWhatsapp !== 'boolean') throw new Error('Resposta de verificação Uazapi inválida');
     return { exists: data[0].isInWhatsapp, validPhone: data[0].jid || number };
   }
+  async listGroups(limit = 50, offset = 0) { return this.request('/group/list', 'POST', { limit, offset, noParticipants: true }); }
+  async groupInfo(jid: string) { return this.request('/group/info', 'POST', { groupjid: jid }); }
   async send(phone: string, message: any) {
     const number = normalizeUazapiNumber(phone);
+    const rawHeader = typeof message?.headerText === 'string' && message.headerText.trim()
+      ? message.headerText.trim().replace(/^\*+|\*+$/g, '').trim()
+      : typeof message?.title === 'string' && message.title.trim()
+      ? message.title.trim().replace(/^\*+|\*+$/g, '').trim()
+      : '';
+    const formatWithHeader = (txt: string) => {
+      const base = typeof txt === 'string' ? txt : '';
+      if (!rawHeader) return base;
+      if (base.startsWith(`*${rawHeader}*`)) return base;
+      return base.trim() ? `*${rawHeader}*\n\n${base}` : `*${rawHeader}*`;
+    };
     let endpoint = '/send/text';
-    let body: any = { number, text: message.text, async: false, track_source: 'ruptur-campaign' };
+    const textWithHeader = formatWithHeader(message.text || '');
+    let body: any = {
+      number,
+      text: textWithHeader,
+      ...(rawHeader ? { headerText: rawHeader, title: rawHeader } : {}),
+      async: false,
+      track_source: 'ruptur-campaign'
+    };
     // Campaign internals use { image: { url }, caption }, while callers that
     // already speak Uazapi use { type, file, text }. Normalize both forms to
     // the exact /send/media contract from the Uazapi specification.
@@ -79,16 +100,17 @@ export class UazapiClient {
       const file = typeof media === 'string' ? media : media?.url || media?.file || message.file;
       if (typeof file !== 'string' || !file) throw new Error('Arquivo de mídia obrigatório');
       endpoint = '/send/media';
-      const fileUrl = file.startsWith('/')
-        ? (process.env.APP_URL ? new URL(file, process.env.APP_URL).toString() : file)
-        : file;
-      const caption = message.caption ?? (typeof media === 'object' ? media.caption : undefined) ?? message.text ?? '';
+      const baseAppUrl = process.env.APP_URL || 'https://ruptur-campaign.ruptur.cloud';
+      const fileUrl = file.startsWith('/') ? new URL(file, baseAppUrl).toString() : file;
+      const rawCaption = message.caption ?? (typeof media === 'object' ? media.caption : undefined) ?? message.text ?? '';
+      const caption = formatWithHeader(rawCaption);
       body = { number, type, file: fileUrl, text: caption,
+        ...(rawHeader ? { headerText: rawHeader, title: rawHeader } : {}),
         ...(type === 'document' ? { docName: message.fileName || media?.fileName || 'documento.pdf' } : {}),
         ...(message.mimetype ? { mimetype: message.mimetype } : {}),
         ...(message.viewOnce !== undefined ? { viewOnce: !!message.viewOnce } : {}),
         async: false, track_source: 'ruptur-campaign' };
-    } else if (typeof message.text !== 'string' || !message.text.trim()) throw new Error('Texto da mensagem obrigatório');
+    } else if (typeof textWithHeader !== 'string' || !textWithHeader.trim()) throw new Error('Texto da mensagem obrigatório');
     const data = await this.request(endpoint, 'POST', body);
     const id = data.messageid || data.id || data.message?.id || data.key?.id;
     if (!id || data.response?.status === 'error') throw new Error('Uazapi não confirmou o envio com um identificador de mensagem');
