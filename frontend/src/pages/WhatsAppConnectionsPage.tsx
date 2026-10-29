@@ -49,10 +49,66 @@ interface WhatsAppSession {
   provider: 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI';
   qr?: string;
   qrExpiresAt?: Date;
+  meId?: string | null;
+  meJid?: string | null;
+  mePushName?: string | null;
+  profilePicUrl?: string | null;
   me?: {
     id: string;
     pushName: string;
+    jid?: string;
+    profilePicUrl?: string | null;
   };
+}
+
+function formatConnectionPhone(session: WhatsAppSession): string {
+  const raw = session.me?.id || session.meId || session.meJid || '';
+  const cleaned = String(raw).split('@')[0].split(':')[0].replace(/\D/g, '');
+  let digits = cleaned;
+  if (!digits || digits.length < 8) {
+    const fallbackMatch = String(session.displayName || session.name || '').match(/^(\d{10,15})/);
+    if (fallbackMatch) digits = fallbackMatch[1];
+  }
+  if (!digits || digits.length < 8) return '';
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    const ddd = digits.slice(2, 4);
+    const rest = digits.slice(4);
+    const part1 = rest.length === 9 ? rest.slice(0, 5) : rest.slice(0, 4);
+    const part2 = rest.length === 9 ? rest.slice(5) : rest.slice(4);
+    return `+55 (${ddd}) ${part1}-${part2}`;
+  }
+  return `+${digits}`;
+}
+
+function ConnectionAvatar({ session }: { session: WhatsAppSession }) {
+  const [imgError, setImgError] = useState(false);
+  const picUrl = session.profilePicUrl || session.me?.profilePicUrl || '';
+  const label = (session.me?.pushName || session.mePushName || session.displayName || session.name || 'WA').trim();
+  const initials = label.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || 'WA';
+  const isWorking = session.status === 'WORKING';
+
+  return (
+    <div className="relative flex-shrink-0">
+      {picUrl && !imgError ? (
+        <img
+          src={picUrl}
+          alt={label}
+          onError={() => setImgError(true)}
+          className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500 shadow-sm bg-gray-100"
+        />
+      ) : (
+        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white font-bold text-sm flex items-center justify-center border-2 border-white shadow-sm">
+          {initials}
+        </div>
+      )}
+      <span
+        className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white ${
+          isWorking ? 'bg-green-500' : session.status === 'SCAN_QR_CODE' ? 'bg-yellow-400' : 'bg-gray-400'
+        }`}
+        title={isWorking ? 'Conectado' : session.status}
+      />
+    </div>
+  );
 }
 
 
@@ -604,41 +660,58 @@ export function WhatsAppConnectionsPage() {
         ) : (
           <div className="divide-y divide-gray-200">
             {sessions.map((session) => (
-              <div key={session.name} className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h4 className="text-lg font-medium text-gray-900">{session.displayName || session.name}</h4>
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        session.provider === 'EVOLUTION' ? 'bg-blue-100 text-blue-800' :
-                        session.provider === 'QUEPASA' ? 'bg-purple-100 text-purple-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        <img
-                          src={
-                            session.provider === 'UAZAPI' ? '/iconeuazapi.svg' :
-                          session.provider === 'EVOLUTION' ? '/iconeevolutionapi.png' :
-                            session.provider === 'QUEPASA' ? '/iconequepasa.png' :
-                            '/iconewaha.png'
-                          }
-                          alt={session.provider}
-                          className="w-4 h-4 object-contain"
-                        />
-                        {session.provider === 'UAZAPI' ? 'Uazapi' :
-                       session.provider === 'EVOLUTION' ? 'Evolution API' :
-                         session.provider === 'QUEPASA' ? 'Quepasa' :
-                         'Waha'}
-                      </span>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(session.status)}`}>
-                        {getStatusText(session.status)}
-                      </span>
-                    </div>
+              <div key={session.name} className="p-6 hover:bg-gray-50/60 transition-colors">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4 flex-1 min-w-0">
+                    <ConnectionAvatar session={session} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2.5 mb-1.5">
+                        <h4 className="text-lg font-semibold text-gray-900 truncate">{session.displayName || session.name}</h4>
+                        {formatConnectionPhone(session) && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-mono font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            📱 {formatConnectionPhone(session)}
+                          </span>
+                        )}
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          session.provider === 'EVOLUTION' ? 'bg-blue-100 text-blue-800' :
+                          session.provider === 'QUEPASA' ? 'bg-purple-100 text-purple-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          <img
+                            src={
+                              session.provider === 'UAZAPI' ? '/iconeuazapi.svg' :
+                              session.provider === 'EVOLUTION' ? '/iconeevolutionapi.png' :
+                              session.provider === 'QUEPASA' ? '/iconequepasa.png' :
+                              '/iconewaha.png'
+                            }
+                            alt={session.provider}
+                            className="w-4 h-4 object-contain"
+                          />
+                          {session.provider === 'UAZAPI' ? 'Uazapi' :
+                           session.provider === 'EVOLUTION' ? 'Evolution API' :
+                           session.provider === 'QUEPASA' ? 'Quepasa' :
+                           'Waha'}
+                        </span>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(session.status)}`}>
+                          {getStatusText(session.status)}
+                        </span>
+                      </div>
 
-                    {session.me && (
-                      <p className="text-sm text-gray-600">
-                        Conectado como: <span className="font-medium">{session.me.pushName}</span> ({session.me.id})
-                      </p>
-                    )}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600">
+                        {(session.me?.pushName || session.mePushName) && (
+                          <span>
+                            Perfil WhatsApp: <strong className="text-gray-800">{session.me?.pushName || session.mePushName}</strong>
+                          </span>
+                        )}
+                        {formatConnectionPhone(session) ? (
+                          <span>
+                            Número: <strong className="font-mono text-gray-800">{formatConnectionPhone(session)}</strong>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">Número ainda não identificado (conecte a instância)</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex gap-2 ml-4">

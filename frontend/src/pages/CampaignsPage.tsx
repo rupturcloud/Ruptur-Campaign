@@ -36,6 +36,10 @@ interface Campaign {
     displayName?: string;
     status: string;
     mePushName: string | null;
+    meId?: string | null;
+    meJid?: string | null;
+    profilePicUrl?: string | null;
+    provider?: string;
   };
   _count: {
     messages: number;
@@ -47,6 +51,66 @@ interface WhatsAppSession {
   displayName?: string; // Nome exibido ao usuário
   mePushName: string | null;
   meId: string | null;
+  meJid?: string | null;
+  profilePicUrl?: string | null;
+  provider?: string;
+  status?: string;
+}
+
+function formatSessionPhone(session?: Partial<WhatsAppSession> | null, fallbackName?: string): string {
+  const raw = session?.meId || session?.meJid || '';
+  const cleaned = String(raw).split('@')[0].split(':')[0].replace(/\D/g, '');
+  let digits = cleaned;
+  if (!digits || digits.length < 8) {
+    const candidate = String(session?.displayName || session?.name || fallbackName || '');
+    const m = candidate.match(/^(\d{10,15})/);
+    if (m) digits = m[1];
+  }
+  if (!digits || digits.length < 8) return '';
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    const ddd = digits.slice(2, 4);
+    const rest = digits.slice(4);
+    const p1 = rest.length === 9 ? rest.slice(0, 5) : rest.slice(0, 4);
+    const p2 = rest.length === 9 ? rest.slice(5) : rest.slice(4);
+    return `+55 (${ddd}) ${p1}-${p2}`;
+  }
+  return `+${digits}`;
+}
+
+function SessionAvatar({
+  session,
+  size = 'md'
+}: {
+  session?: Partial<WhatsAppSession> | null;
+  size?: 'sm' | 'md';
+}) {
+  const [imgError, setImgError] = useState(false);
+  const picUrl = session?.profilePicUrl || '';
+  const label = (session?.mePushName || session?.displayName || session?.name || 'WA').trim();
+  const initials = label.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || 'WA';
+  const dim = size === 'sm' ? 'w-6 h-6 text-[10px]' : 'w-10 h-10 text-xs';
+
+  return (
+    <div className="relative flex-shrink-0">
+      {picUrl && !imgError ? (
+        <img
+          src={picUrl}
+          alt={label}
+          onError={() => setImgError(true)}
+          className={`${dim} rounded-full object-cover border border-emerald-400 bg-gray-100 shadow-sm`}
+        />
+      ) : (
+        <div
+          className={`${dim} rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white font-bold flex items-center justify-center border border-white shadow-sm`}
+        >
+          {initials}
+        </div>
+      )}
+      {size === 'md' && (
+        <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-white" title="Ativa" />
+      )}
+    </div>
+  );
 }
 
 interface ContactTag {
@@ -107,6 +171,8 @@ export function CampaignsPage() {
   const [uploadingFiles, setUploadingFiles] = useState<{ [key: number]: boolean }>({});
   const [fileInfos, setFileInfos] = useState<{ [key: number]: { name: string, size: number, type: string } }>({});
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [sessionFilterTab, setSessionFilterTab] = useState<'all' | 'selected' | 'unselected'>('all');
 
   // Form states
   const [formData, setFormData] = useState({
@@ -837,18 +903,31 @@ export function CampaignsPage() {
                         <span>{campaign.sentCount}/{campaign.totalContacts}</span>
                       </div>
 
-                      {/* Sessões ativas (apenas ícones) */}
+                      {/* Instâncias vinculadas com foto e telefone */}
                       {campaign.sessionNames && campaign.sessionNames.length > 0 && (
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-gray-500">Sessões:</span>
-                          <div className="flex gap-1">
-                            {campaign.sessionNames.slice(0, 3).map((sessionName, index) => (
-                              <span key={index} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-800">
-                                {sessionName.substring(0, 3)}
-                              </span>
-                            ))}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-gray-500">Instâncias ({campaign.sessionNames.length}):</span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {campaign.sessionNames.slice(0, 3).map((sName, index) => {
+                              const matched = whatsappSessions.find(ws => ws.name === sName) || (campaign.session?.name === sName ? campaign.session : undefined);
+                              const phoneStr = formatSessionPhone(matched, sName);
+                              const displayLabel = matched?.displayName || matched?.mePushName || sName;
+                              return (
+                                <span
+                                  key={index}
+                                  title={`${displayLabel}${phoneStr ? ' • ' + phoneStr : ''}`}
+                                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-900 border border-emerald-200"
+                                >
+                                  <SessionAvatar session={matched || { name: sName }} size="sm" />
+                                  <span className="font-medium max-w-[100px] truncate">{displayLabel}</span>
+                                  {phoneStr && <span className="font-mono text-[11px] text-emerald-700 hidden md:inline">{phoneStr}</span>}
+                                </span>
+                              );
+                            })}
                             {campaign.sessionNames.length > 3 && (
-                              <span className="text-xs text-gray-500">+{campaign.sessionNames.length - 3}</span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                                +{campaign.sessionNames.length - 3} instâncias
+                              </span>
                             )}
                           </div>
                         </div>
@@ -1024,64 +1103,224 @@ export function CampaignsPage() {
                       </p>
                     </div>
 
-                    {/* Conexões WhatsApp */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm font-medium text-gray-700">
-                          Conexões WhatsApp * ({formData.sessionNames.length} selecionadas)
-                        </label>
+                    {/* Conexões WhatsApp — High-Scale Resource Selector (100+ instâncias) */}
+                    <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                        <div className="flex items-center gap-2">
+                          <label className="block text-sm font-semibold text-gray-900">
+                            📱 Instâncias WhatsApp do Disparo *
+                          </label>
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            {formData.sessionNames.length} / {whatsappSessions.length} selecionada(s)
+                          </span>
+                        </div>
                         {whatsappSessions.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleSelectAllSessions}
-                            className="text-xs text-blue-600 hover:text-blue-700 font-medium underline"
-                          >
-                            {formData.sessionNames.length === whatsappSessions.length ? 'Desmarcar todas' : 'Selecionar todas'}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleSelectAllSessions}
+                              className="text-xs px-2.5 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border border-blue-200 transition-colors"
+                            >
+                              {formData.sessionNames.length === whatsappSessions.length ? 'Desmarcar todas' : `Selecionar todas (${whatsappSessions.length})`}
+                            </button>
+                            {formData.sessionNames.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setFormData(prev => ({ ...prev, sessionNames: [] }))}
+                                className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 font-medium"
+                              >
+                                Limpar
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
-                      <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                        <div className="flex items-start">
-                          <svg className="h-5 w-5 text-green-500 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                          </svg>
-                          <div>
-                            <h4 className="text-sm font-medium text-green-800">Multi-Sessão com Failover</h4>
-                            <p className="text-sm text-green-700 mt-1">
-                              Sistema inteligente que distribui envios entre múltiplas conexões com redundância automática.
-                            </p>
-                          </div>
+
+                      <div className="mb-3 p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs text-emerald-800">
+                          <span>🔄</span>
+                          <span>
+                            <strong>Multi-Instância com Failover:</strong> Os disparos são distribuídos automaticamente entre as instâncias selecionadas.
+                          </span>
                         </div>
                       </div>
-                      <div className="max-h-40 overflow-y-auto border border-gray-300 rounded-md p-3 bg-gray-50">
+
+                      {/* Barra de busca e filtros rápidos para escalar até 100+ instâncias */}
+                      {whatsappSessions.length > 0 && (
+                        <div className="space-y-2 mb-3">
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={sessionSearch}
+                              onChange={(e) => setSessionSearch(e.target.value)}
+                              placeholder="🔍 Buscar instância por nome, número (+55...) ou perfil..."
+                              className="w-full pl-3 pr-8 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-gray-50 focus:bg-white"
+                            />
+                            {sessionSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setSessionSearch('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1">
+                              {([
+                                { id: 'all', label: `Todas (${whatsappSessions.length})` },
+                                { id: 'selected', label: `Selecionadas (${formData.sessionNames.length})` },
+                                { id: 'unselected', label: `Disponíveis (${Math.max(0, whatsappSessions.length - formData.sessionNames.length)})` }
+                              ] as const).map(tab => (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  onClick={() => setSessionFilterTab(tab.id)}
+                                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                                    sessionFilterTab === tab.id
+                                      ? 'bg-emerald-700 text-white shadow-sm'
+                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {tab.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {sessionSearch.trim() !== '' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const q = sessionSearch.toLowerCase().trim();
+                                  const matchingNames = whatsappSessions
+                                    .filter(s => {
+                                      const phone = formatSessionPhone(s);
+                                      const hay = `${s.displayName || ''} ${s.name || ''} ${s.mePushName || ''} ${s.meId || ''} ${phone}`.toLowerCase();
+                                      return hay.includes(q);
+                                    })
+                                    .map(s => s.name);
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    sessionNames: Array.from(new Set([...prev.sessionNames, ...matchingNames]))
+                                  }));
+                                }}
+                                className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                              >
+                                + Marcar filtradas
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Grid de Cards das Instâncias com Foto + Telefone */}
+                      <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-gray-50/70">
                         {whatsappSessions.length === 0 ? (
-                          <p className="text-sm text-gray-500 text-center py-4">Nenhuma conexão WhatsApp disponível</p>
+                          <p className="text-sm text-gray-500 text-center py-6">
+                            Nenhuma conexão WhatsApp ativa encontrada. Conecte ou sincronize suas instâncias na aba Conexões.
+                          </p>
                         ) : (
-                          whatsappSessions.map((session) => (
-                            <label key={session.name} className="flex items-center justify-between space-x-2 mb-2 p-2 rounded hover:bg-white cursor-pointer">
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="checkbox"
-                                  checked={formData.sessionNames.includes(session.name)}
-                                  onChange={() => handleSessionToggle(session.name)}
-                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                <div>
-                                  <span className="text-sm font-medium text-gray-700">
-                                    {session.mePushName || session.displayName || session.name}
-                                  </span>
-                                  <span className="text-xs text-gray-500 block">({session.displayName || session.name})</span>
-                                </div>
-                              </div>
-                              <span className="text-xs px-2 py-1 bg-green-100 text-green-800 rounded-full">
-                                Ativa
-                              </span>
-                            </label>
-                          ))
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {whatsappSessions
+                              .filter((session) => {
+                                const isSel = formData.sessionNames.includes(session.name);
+                                if (sessionFilterTab === 'selected' && !isSel) return false;
+                                if (sessionFilterTab === 'unselected' && isSel) return false;
+                                if (!sessionSearch.trim()) return true;
+                                const q = sessionSearch.toLowerCase().trim();
+                                const phone = formatSessionPhone(session);
+                                const hay = `${session.displayName || ''} ${session.name || ''} ${session.mePushName || ''} ${session.meId || ''} ${phone}`.toLowerCase();
+                                return hay.includes(q);
+                              })
+                              .map((session) => {
+                                const isSelected = formData.sessionNames.includes(session.name);
+                                const formattedPhone = formatSessionPhone(session);
+                                const primaryName = session.displayName || session.name;
+                                const pushName = session.mePushName && session.mePushName !== primaryName ? session.mePushName : null;
+
+                                return (
+                                  <label
+                                    key={session.name}
+                                    className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all select-none ${
+                                      isSelected
+                                        ? 'border-emerald-500 bg-emerald-50/80 ring-1 ring-emerald-500 shadow-sm'
+                                        : 'border-gray-200 bg-white hover:border-emerald-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => handleSessionToggle(session.name)}
+                                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 flex-shrink-0"
+                                    />
+                                    <SessionAvatar session={session} size="md" />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="text-xs font-bold text-gray-900 truncate" title={primaryName}>
+                                          {primaryName}
+                                        </span>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium flex-shrink-0">
+                                          {session.provider === 'UAZAPI' ? 'Uazapi' : session.provider || 'WA'}
+                                        </span>
+                                      </div>
+                                      {pushName && (
+                                        <span className="text-[11px] text-gray-600 block truncate" title={pushName}>
+                                          👤 {pushName}
+                                        </span>
+                                      )}
+                                      <div className="mt-1 flex items-center gap-1">
+                                        {formattedPhone ? (
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold bg-emerald-100/90 text-emerald-900 border border-emerald-200 truncate">
+                                            📱 {formattedPhone}
+                                          </span>
+                                        ) : (
+                                          <span className="text-[10px] text-gray-400 italic">Sem número identificado</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                          </div>
                         )}
                       </div>
+
+                      {/* Resumo visual rápido das instâncias selecionadas */}
                       {formData.sessionNames.length > 0 && (
-                        <p className="text-xs text-green-600 mt-2">✅ {formData.sessionNames.length} conexão(ões) selecionada(s)</p>
+                        <div className="mt-2.5 pt-2.5 border-t border-gray-200">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-semibold text-emerald-800">
+                              ✅ {formData.sessionNames.length} instância(s) pronta(s) para o disparo:
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                            {formData.sessionNames.map((sName) => {
+                              const sObj = whatsappSessions.find(w => w.name === sName);
+                              const phone = formatSessionPhone(sObj, sName);
+                              const label = sObj?.displayName || sObj?.mePushName || sName;
+                              return (
+                                <span
+                                  key={sName}
+                                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs"
+                                >
+                                  <SessionAvatar session={sObj || { name: sName }} size="sm" />
+                                  <span className="font-medium max-w-[110px] truncate">{label}</span>
+                                  {phone && <span className="font-mono text-[10px] text-emerald-700">{phone}</span>}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSessionToggle(sName)}
+                                    className="ml-0.5 text-emerald-700 hover:text-red-600 font-bold"
+                                    title="Remover desta campanha"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
                       )}
                     </div>
 
@@ -1271,6 +1510,12 @@ export function CampaignsPage() {
                                       case 'groq':
                                         newContent = { model: '', system: '', user: '' };
                                         break;
+                                      case 'openrouter':
+                                        newContent = { model: 'openai/gpt-4o-mini', system: '', user: '' };
+                                        break;
+                                      case 'omnirouter':
+                                        newContent = { model: 'auto', system: '', user: '' };
+                                        break;
                                       case 'wait':
                                         newContent = { waitTime: 30 };
                                         break;
@@ -1298,6 +1543,8 @@ export function CampaignsPage() {
                                   <option value="document">📄 Arquivo</option>
                                   <option value="openai">🤖 OpenAI</option>
                                   <option value="groq">⚡ Groq AI</option>
+                                  <option value="openrouter">🌐 OpenRouter AI (+300 modelos)</option>
+                                  <option value="omnirouter">🧭 OmniRouter AI (Multi-LLM)</option>
                                   <option value="wait">⏱️ Espera</option>
                                 </select>
 
@@ -1852,6 +2099,180 @@ export function CampaignsPage() {
                                       <p className="text-xs text-gray-500 mt-1">
                                         A IA usará este prompt junto com os dados do contato para gerar a mensagem
                                       </p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {(item.type === 'openrouter' || item.type === 'omnirouter') && (
+                                  <div className="space-y-4">
+                                    <div className={`border rounded-lg p-4 ${
+                                      item.type === 'openrouter'
+                                        ? 'bg-indigo-50 border-indigo-200'
+                                        : 'bg-teal-50 border-teal-200'
+                                    }`}>
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className={`font-semibold ${
+                                          item.type === 'openrouter' ? 'text-indigo-800' : 'text-teal-800'
+                                        }`}>
+                                          {item.type === 'openrouter' ? '🌐 OpenRouter AI' : '🧭 OmniRouter AI'}
+                                        </span>
+                                      </div>
+                                      <p className={`text-xs ${
+                                        item.type === 'openrouter' ? 'text-indigo-700' : 'text-teal-700'
+                                      }`}>
+                                        {item.type === 'openrouter'
+                                          ? 'Gere mensagens personalizadas usando Claude, Gemini, DeepSeek, Llama ou GPT via OpenRouter.'
+                                          : 'Roteamento inteligente multi-LLM com failover automático via OmniRouter.'}
+                                      </p>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Modelo *
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder={
+                                          item.type === 'openrouter'
+                                            ? 'Ex: openai/gpt-4o-mini, anthropic/claude-3.5-sonnet, google/gemini-2.5-flash'
+                                            : 'Ex: auto, auto/best-coding, openai/gpt-4o-mini, anthropic/claude-3.5-sonnet'
+                                        }
+                                        value={item.content.model || ''}
+                                        onChange={(e) => {
+                                          const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                          const newSequence = currentSequence.map((seqItem, i) =>
+                                            i === index ? {
+                                              ...seqItem,
+                                              content: { ...seqItem.content, model: e.target.value }
+                                            } : seqItem
+                                          );
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            messageContent: { sequence: newSequence }
+                                          }));
+                                        }}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                      />
+                                      <div className="mt-2">
+                                        <p className="text-xs text-gray-500 mb-1">Modelos sugeridos:</p>
+                                        <div className="flex flex-wrap gap-1">
+                                          {(item.type === 'openrouter'
+                                            ? [
+                                                'openai/gpt-4o-mini',
+                                                'openai/gpt-4o',
+                                                'anthropic/claude-3.5-sonnet',
+                                                'google/gemini-2.5-flash',
+                                                'deepseek/deepseek-chat',
+                                                'meta-llama/llama-3.3-70b-instruct'
+                                              ]
+                                            : [
+                                                'auto',
+                                                'openai/gpt-4o-mini',
+                                                'openai/gpt-4o',
+                                                'anthropic/claude-3.5-sonnet',
+                                                'google/gemini-2.5-flash',
+                                                'deepseek/deepseek-chat'
+                                              ]
+                                          ).map((model) => (
+                                            <button
+                                              key={model}
+                                              type="button"
+                                              onClick={() => {
+                                                const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                                const newSequence = currentSequence.map((seqItem, i) =>
+                                                  i === index ? {
+                                                    ...seqItem,
+                                                    content: { ...seqItem.content, model }
+                                                  } : seqItem
+                                                );
+                                                setFormData(prev => ({
+                                                  ...prev,
+                                                  messageContent: { sequence: newSequence }
+                                                }));
+                                              }}
+                                              className="px-2 py-1 bg-indigo-50 text-indigo-800 text-xs rounded hover:bg-indigo-100 border border-indigo-200"
+                                            >
+                                              {model}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Prompt do Sistema *
+                                      </label>
+                                      <textarea
+                                        placeholder="Ex: Você é um especialista em atendimento consultivo no WhatsApp. Escreva mensagens curtas, humanas e diretas..."
+                                        value={item.content.system || ''}
+                                        onChange={(e) => {
+                                          const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                          const newSequence = currentSequence.map((seqItem, i) =>
+                                            i === index ? {
+                                              ...seqItem,
+                                              content: { ...seqItem.content, system: e.target.value }
+                                            } : seqItem
+                                          );
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            messageContent: { sequence: newSequence }
+                                          }));
+                                        }}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        rows={3}
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Prompt do Usuário *
+                                      </label>
+                                      <textarea
+                                        placeholder="Ex: Crie uma mensagem personalizada para {{nome}} ({{telefone}})..."
+                                        value={item.content.user || ''}
+                                        onChange={(e) => {
+                                          const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                          const newSequence = currentSequence.map((seqItem, i) =>
+                                            i === index ? {
+                                              ...seqItem,
+                                              content: { ...seqItem.content, user: e.target.value }
+                                            } : seqItem
+                                          );
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            messageContent: { sequence: newSequence }
+                                          }));
+                                        }}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        rows={4}
+                                      />
+                                      <div className="flex flex-wrap gap-1 mt-2">
+                                        <span className="text-xs text-gray-500">Variáveis disponíveis:</span>
+                                        {['{{nome}}', '{{email}}', '{{telefone}}', '{{categoria}}', '{{observacoes}}'].map((variable) => (
+                                          <button
+                                            key={variable}
+                                            type="button"
+                                            onClick={() => {
+                                              const currentSequence = ('sequence' in formData.messageContent) ? formData.messageContent.sequence : [];
+                                              const currentUser = currentSequence[index]?.content?.user || '';
+                                              const newSequence = currentSequence.map((seqItem, i) =>
+                                                i === index ? {
+                                                  ...seqItem,
+                                                  content: { ...seqItem.content, user: currentUser + variable }
+                                                } : seqItem
+                                              );
+                                              setFormData(prev => ({
+                                                ...prev,
+                                                messageContent: { sequence: newSequence }
+                                              }));
+                                            }}
+                                            className="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs rounded hover:bg-indigo-200"
+                                          >
+                                            {variable}
+                                          </button>
+                                        ))}
+                                      </div>
                                     </div>
                                   </div>
                                 )}

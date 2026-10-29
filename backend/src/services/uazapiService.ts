@@ -6,7 +6,9 @@ const prisma = new PrismaClient();
 export function publicUazapiSession(s: WhatsAppSession) {
   return { name: s.name, displayName: s.displayName, status: s.status, provider: s.provider,
     qr: s.qr, qrExpiresAt: s.qrExpiresAt, tenantId: s.tenantId,
-    me: s.meId ? { id: s.meId, pushName: s.mePushName || '' } : undefined,
+    meId: s.meId, meJid: s.meJid, mePushName: s.mePushName,
+    profilePicUrl: (s as any).profilePicUrl || null,
+    me: (s.meId || s.mePushName || (s as any).profilePicUrl) ? { id: s.meId || '', pushName: s.mePushName || '', jid: s.meJid || undefined, profilePicUrl: (s as any).profilePicUrl || null } : undefined,
     interactiveCampaignEnabled: s.interactiveCampaignEnabled };
 }
 export const uazapiService = {

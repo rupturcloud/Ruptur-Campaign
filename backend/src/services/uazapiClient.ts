@@ -138,12 +138,15 @@ export function normalizeUazapiStatus(data: any) {
   const connecting = instance.status === 'connecting';
   const rawQr = !connected && connecting ? instance.qrcode || data.qrcode : null;
   const qr = typeof rawQr === 'string' && rawQr ? (rawQr.startsWith('data:image/') ? rawQr : `data:image/png;base64,${rawQr}`) : null;
-  const jid = data.status?.jid || data.jid;
-  const owner = instance.owner || (typeof jid === 'object' && jid?.user ? `${jid.user}@${jid.server || 's.whatsapp.net'}` : typeof jid === 'string' ? jid : null);
+  const jid = data.status?.jid || data.jid || instance.jid;
+  const owner = instance.owner || instance.phone || (typeof jid === 'object' && jid?.user ? `${jid.user}@${jid.server || 's.whatsapp.net'}` : typeof jid === 'string' ? jid : null);
+  const rawPic = instance.profilePicUrl || instance.profilePic || instance.avatar || data.status?.profilePicUrl || data.profilePicUrl || null;
+  const profilePicUrl = typeof rawPic === 'string' && rawPic.trim() ? rawPic.trim() : null;
   return { status: connected ? 'WORKING' : connecting ? 'SCAN_QR_CODE' : 'STOPPED', qr,
     qrExpiresAt: qr ? new Date(Date.now() + 120000) : null,
-    meId: connected ? owner : null, meJid: connected ? owner : null,
-    mePushName: connected ? instance.profileName || instance.name || '' : null };
+    meId: connected ? owner : (owner || null), meJid: connected ? owner : (owner || null),
+    mePushName: connected ? instance.profileName || instance.name || '' : (instance.profileName || null),
+    ...(profilePicUrl ? { profilePicUrl } : {}) };
 }
 export function extractUazapiMessage(payload: any) {
   const event = payload.EventType || payload.event;

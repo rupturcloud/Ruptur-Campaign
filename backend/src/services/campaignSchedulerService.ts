@@ -6,6 +6,8 @@ import { sendMessageViaQuepasa, checkContactExistsQuepasa } from './quepasaMessa
 import { ContactService } from './contactService';
 import { openaiService } from './openaiService';
 import { groqService } from './groqService';
+import { openrouterService } from './openrouterService';
+import { omnirouterService } from './omnirouterService';
 import { websocketService } from './websocketService';
 import { automationService, TriggerType } from './automationService';
 
@@ -694,6 +696,26 @@ class CampaignSchedulerService {
           result = await sendForTenant(instanceName, phone, { text: groqResult.message });
           break;
 
+        case 'openrouter': {
+          console.log('🌐 Gerando mensagem com OpenRouter (Uazapi)...', content);
+          const orResult = await openrouterService.generateMessage(content, contactData, tenantId);
+          if (!orResult.success) {
+            throw new Error(`OpenRouter error: ${orResult.error}`);
+          }
+          result = await sendForTenant(instanceName, phone, { text: orResult.message });
+          break;
+        }
+
+        case 'omnirouter': {
+          console.log('🧭 Gerando mensagem com OmniRouter (Uazapi)...', content);
+          const omniResult = await omnirouterService.generateMessage(content, contactData, tenantId);
+          if (!omniResult.success) {
+            throw new Error(`OmniRouter error: ${omniResult.error}`);
+          }
+          result = await sendForTenant(instanceName, phone, { text: omniResult.message });
+          break;
+        }
+
         case 'sequence':
           // Para sequência, enviar todos os itens com delay entre eles
           if (!content.sequence || content.sequence.length === 0) {
@@ -818,6 +840,20 @@ class CampaignSchedulerService {
           result = await sendMessageViaEvolution(instanceName, phone, { text: groqResult.message });
           break;
 
+        case 'openrouter': {
+          const orResult = await openrouterService.generateMessage(content, contactData, tenantId);
+          if (!orResult.success) throw new Error(`OpenRouter error: ${orResult.error}`);
+          result = await sendMessageViaEvolution(instanceName, phone, { text: orResult.message });
+          break;
+        }
+
+        case 'omnirouter': {
+          const omniResult = await omnirouterService.generateMessage(content, contactData, tenantId);
+          if (!omniResult.success) throw new Error(`OmniRouter error: ${omniResult.error}`);
+          result = await sendMessageViaEvolution(instanceName, phone, { text: omniResult.message });
+          break;
+        }
+
         case 'sequence':
           // Para sequência, enviar todos os itens com delay entre eles
           if (!content.sequence || content.sequence.length === 0) {
@@ -940,6 +976,20 @@ class CampaignSchedulerService {
           result = await sendMessageViaQuepasa(sessionName, phone, { text: groqResult.message }, sessionToken);
           break;
 
+        case 'openrouter': {
+          const orResult = await openrouterService.generateMessage(content, contactData, tenantId);
+          if (!orResult.success) throw new Error(`OpenRouter error: ${orResult.error}`);
+          result = await sendMessageViaQuepasa(sessionName, phone, { text: orResult.message }, sessionToken);
+          break;
+        }
+
+        case 'omnirouter': {
+          const omniResult = await omnirouterService.generateMessage(content, contactData, tenantId);
+          if (!omniResult.success) throw new Error(`OmniRouter error: ${omniResult.error}`);
+          result = await sendMessageViaQuepasa(sessionName, phone, { text: omniResult.message }, sessionToken);
+          break;
+        }
+
         case 'sequence':
           // Para sequência, enviar todos os itens com delay entre eles
           if (!content.sequence || content.sequence.length === 0) {
@@ -1060,6 +1110,20 @@ class CampaignSchedulerService {
           // Enviar a mensagem gerada como texto
           result = await sendMessage(sessionName, phone, { text: groqResult.message }, validatedChatId);
           break;
+
+        case 'openrouter': {
+          const orResult = await openrouterService.generateMessage(content, contactData, tenantId);
+          if (!orResult.success) throw new Error(`OpenRouter error: ${orResult.error}`);
+          result = await sendMessage(sessionName, phone, { text: orResult.message }, validatedChatId);
+          break;
+        }
+
+        case 'omnirouter': {
+          const omniResult = await omnirouterService.generateMessage(content, contactData, tenantId);
+          if (!omniResult.success) throw new Error(`OmniRouter error: ${omniResult.error}`);
+          result = await sendMessage(sessionName, phone, { text: omniResult.message }, validatedChatId);
+          break;
+        }
 
         case 'sequence':
           // Para sequência, enviar todos os itens com delay entre eles

@@ -13,7 +13,9 @@ export interface WhatsAppSessionData {
     pushName: string;
     lid?: string;
     jid?: string;
+    profilePicUrl?: string | null;
   };
+  profilePicUrl?: string | null;
   qr?: string;
   qrExpiresAt?: Date;
   assignedWorker?: string;
@@ -48,12 +50,17 @@ export class WhatsAppSessionService {
       status: session.status,
       provider: session.provider as 'WAHA' | 'EVOLUTION' | 'QUEPASA' | 'UAZAPI',
       config: session.config ? JSON.parse(session.config) : {},
-      me: session.meId ? {
-        id: session.meId,
+      me: (session.meId || session.mePushName || (session as any).profilePicUrl) ? {
+        id: session.meId || '',
         pushName: session.mePushName || '',
         lid: session.meLid,
-        jid: session.meJid
+        jid: session.meJid,
+        profilePicUrl: (session as any).profilePicUrl || null
       } : undefined,
+      meId: session.meId,
+      meJid: session.meJid,
+      mePushName: session.mePushName,
+      profilePicUrl: (session as any).profilePicUrl || null,
       qr: session.qr,
       qrExpiresAt: session.qrExpiresAt,
       assignedWorker: session.assignedWorker,
@@ -87,12 +94,17 @@ export class WhatsAppSessionService {
       status: session.status,
       provider: session.provider,
       config: session.config ? JSON.parse(session.config) : {},
-      me: session.meId ? {
-        id: session.meId,
+      me: (session.meId || session.mePushName || (session as any).profilePicUrl) ? {
+        id: session.meId || '',
         pushName: session.mePushName || '',
         lid: session.meLid,
-        jid: session.meJid
+        jid: session.meJid,
+        profilePicUrl: (session as any).profilePicUrl || null
       } : undefined,
+      meId: session.meId,
+      meJid: session.meJid,
+      mePushName: session.mePushName,
+      profilePicUrl: (session as any).profilePicUrl || null,
       qr: session.qr,
       qrExpiresAt: session.qrExpiresAt,
       assignedWorker: session.assignedWorker,

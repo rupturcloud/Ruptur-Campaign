@@ -402,6 +402,8 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
             <option value="document">📄 Arquivo</option>
             <option value="openai">🤖 OpenAI</option>
             <option value="groq">⚡ Groq AI</option>
+            <option value="openrouter">🌐 OpenRouter AI</option>
+            <option value="omnirouter">🧭 OmniRouter AI</option>
           </select>
         </div>
 
@@ -854,8 +856,8 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
           </div>
         )}
 
-        {/* TIPO: GROQ */}
-        {config.actionType === 'groq' && (
+        {/* TIPO: GROQ / OPENROUTER / OMNIROUTER */}
+        {(config.actionType === 'groq' || config.actionType === 'openrouter' || config.actionType === 'omnirouter') && (
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1318,6 +1320,8 @@ export function NodeConfigSidebar({ node, nodes, edges, connections, categories 
           >
             <option value="openai">🤖 OpenAI</option>
             <option value="groq">⚡ Groq AI</option>
+            <option value="openrouter">🌐 OpenRouter AI</option>
+            <option value="omnirouter">🧭 OmniRouter AI</option>
           </select>
         </div>
 

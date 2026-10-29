@@ -77,6 +77,9 @@ model TenantSettings {
   perfexToken        String?  @map("perfex_token")
   uazapiUrl          String?  @map("uazapi_url")
   uazapiAdminToken   String?  @map("uazapi_admin_token")
+  openrouterApiKey   String?  @map("openrouter_api_key")
+  omnirouterApiKey   String?  @map("omnirouter_api_key")
+  omnirouterUrl      String?  @map("omnirouter_url")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
@@ -184,6 +187,7 @@ model WhatsAppSession {
   mePushName                 String?    @map("me_push_name")
   meLid                      String?    @map("me_lid")
   meJid                      String?    @map("me_jid")
+  profilePicUrl              String?    @map("profile_pic_url")
   qr                         String?
   qrExpiresAt                DateTime?  @map("qr_expires_at")
   assignedWorker             String?    @map("assigned_worker")

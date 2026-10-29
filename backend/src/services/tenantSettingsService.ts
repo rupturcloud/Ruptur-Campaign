@@ -46,6 +46,9 @@ export class TenantSettingsService {
     perfexToken?: string | null;
     uazapiUrl?: string | null;
     uazapiAdminToken?: string | null;
+    openrouterApiKey?: string | null;
+    omnirouterApiKey?: string | null;
+    omnirouterUrl?: string | null;
   }) {
     try {
       const settings = await prisma.tenantSettings.upsert({
@@ -53,6 +56,9 @@ export class TenantSettingsService {
         update: {
           openaiApiKey: data.openaiApiKey !== undefined ? data.openaiApiKey : undefined,
           groqApiKey: data.groqApiKey !== undefined ? data.groqApiKey : undefined,
+          openrouterApiKey: data.openrouterApiKey !== undefined ? data.openrouterApiKey : undefined,
+          omnirouterApiKey: data.omnirouterApiKey !== undefined ? data.omnirouterApiKey : undefined,
+          omnirouterUrl: data.omnirouterUrl !== undefined ? data.omnirouterUrl : undefined,
           customBranding: data.customBranding !== undefined ? data.customBranding : undefined,
           chatwootUrl: data.chatwootUrl !== undefined ? data.chatwootUrl : undefined,
           chatwootAccountId: data.chatwootAccountId !== undefined ? data.chatwootAccountId : undefined,
@@ -66,6 +72,9 @@ export class TenantSettingsService {
           tenantId,
           openaiApiKey: data.openaiApiKey || null,
           groqApiKey: data.groqApiKey || null,
+          openrouterApiKey: data.openrouterApiKey || null,
+          omnirouterApiKey: data.omnirouterApiKey || null,
+          omnirouterUrl: data.omnirouterUrl || null,
           customBranding: data.customBranding || undefined,
           chatwootUrl: data.chatwootUrl || null,
           chatwootAccountId: data.chatwootAccountId || null,

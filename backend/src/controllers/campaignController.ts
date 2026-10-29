@@ -4,6 +4,7 @@ import { body, validationResult } from 'express-validator';
 import { ContactService } from '../services/contactService';
 import { CategoryService } from '../services/categoryService';
 import { AuthenticatedRequest } from '../middleware/auth';
+import { uazapiService } from '../services/uazapiService';
 
 const prisma = new PrismaClient();
 
@@ -29,7 +30,7 @@ export const campaignValidation = [
     if (req.body?.status === 'DRAFT' || req.body?.sendMode === 'draft') return true;
     return Array.isArray(val) && val.length >= 1;
   }).withMessage('Pelo menos uma sessão WhatsApp deve ser selecionada'),
-  body('messageType').optional().isIn(['text', 'image', 'video', 'audio', 'document', 'uazapi', 'sequence', 'openai', 'groq', 'wait']).withMessage('Tipo de mensagem inválido'),
+  body('messageType').optional().isIn(['text', 'image', 'video', 'audio', 'document', 'uazapi', 'sequence', 'openai', 'groq', 'openrouter', 'omnirouter', 'wait']).withMessage('Tipo de mensagem inválido'),
   body('messageContent').custom((val, { req }) => {
     if (req.body?.status === 'DRAFT' || req.body?.sendMode === 'draft') return true;
     return Boolean(val);
@@ -73,6 +74,9 @@ export const listCampaigns = async (req: AuthenticatedRequest, res: Response) =>
               displayName: true,
               status: true,
               mePushName: true,
+              meId: true,
+              meJid: true,
+              profilePicUrl: true,
               provider: true
             }
           },
@@ -759,14 +763,35 @@ export const getActiveSessions = async (req: AuthenticatedRequest, res: Response
       where.tenantId = req.tenantId;
     }
 
+    const rawSessions = await prisma.whatsAppSession.findMany({
+      where,
+      orderBy: { atualizadoEm: 'desc' }
+    });
+
+    // Sincronizar rapidamente foto/telefone das sessões UAZAPI ativas que ainda não possuem profilePicUrl ou meId
+    const needsRefresh = rawSessions.filter(s => s.provider === 'UAZAPI' && (!(s as any).profilePicUrl || !s.meId));
+    if (needsRefresh.length > 0) {
+      await Promise.all(needsRefresh.map(async (s) => {
+        try {
+          await uazapiService.refresh(s);
+        } catch {
+          // Ignorar falha individual para não bloquear listagem
+        }
+      }));
+    }
+
     const sessions = await prisma.whatsAppSession.findMany({
       where,
+      orderBy: { atualizadoEm: 'desc' },
       select: {
         name: true,
         displayName: true,
         mePushName: true,
         meId: true,
-        provider: true
+        meJid: true,
+        profilePicUrl: true,
+        provider: true,
+        status: true
       }
     });
 

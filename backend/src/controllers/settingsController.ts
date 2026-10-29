@@ -92,6 +92,27 @@ export const settingsValidation = [
     }
     return true;
   }),
+  body('openrouterApiKey').optional().custom((value) => {
+    if (!value || value === '') return true;
+    if (value.length < 8) {
+      throw new Error('API Key do OpenRouter deve ter pelo menos 8 caracteres');
+    }
+    return true;
+  }),
+  body('omnirouterApiKey').optional().custom((value) => {
+    if (!value || value === '') return true;
+    if (value.length < 8) {
+      throw new Error('API Key do OmniRouter deve ter pelo menos 8 caracteres');
+    }
+    return true;
+  }),
+  body('omnirouterUrl').optional().custom((value) => {
+    if (!value || value === '') return true;
+    if (!/^https?:\/\/.+/.test(value)) {
+      throw new Error('URL do OmniRouter deve ser uma URL válida');
+    }
+    return true;
+  }),
   body('evolutionHost').optional().custom((value) => {
     if (!value || value === '') return true;
     if (!/^https?:\/\/.+/.test(value)) {
@@ -136,6 +157,9 @@ export const getSettings = async (req: AuthenticatedRequest, res: Response) => {
       ...globalSettings,
       openaiApiKey: tenantSettings?.openaiApiKey || null,
       groqApiKey: tenantSettings?.groqApiKey || null,
+      openrouterApiKey: (tenantSettings as any)?.openrouterApiKey || null,
+      omnirouterApiKey: (tenantSettings as any)?.omnirouterApiKey || null,
+      omnirouterUrl: (tenantSettings as any)?.omnirouterUrl || 'https://api.omnirouters.com/v1',
       chatwootUrl: tenantSettings?.chatwootUrl || null,
       chatwootAccountId: tenantSettings?.chatwootAccountId || null,
       chatwootApiToken: tenantSettings?.chatwootApiToken || null,
@@ -179,7 +203,7 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
 
     // Permitir ADMIN e SUPERADMIN configurarem a conta Uazapi
 
-    const { uazapiHost, uazapiUrl, uazapiAdminToken, wahaHost, wahaApiKey, evolutionHost, evolutionApiKey, quepasaUrl, quepasaLogin, quepasaPassword, companyName, pageTitle, openaiApiKey, groqApiKey, chatwootUrl, chatwootAccountId, chatwootApiToken, perfexUrl, perfexToken, tenantId } = req.body;
+    const { uazapiHost, uazapiUrl, uazapiAdminToken, wahaHost, wahaApiKey, evolutionHost, evolutionApiKey, quepasaUrl, quepasaLogin, quepasaPassword, companyName, pageTitle, openaiApiKey, groqApiKey, openrouterApiKey, omnirouterApiKey, omnirouterUrl, chatwootUrl, chatwootAccountId, chatwootApiToken, perfexUrl, perfexToken, tenantId } = req.body;
     const effectiveUazapiHost = uazapiUrl !== undefined ? uazapiUrl : uazapiHost;
 
     // Atualizar configurações globais (WAHA, Evolution, Quepasa são globais)
@@ -206,10 +230,13 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
 
     // Atualizar configurações do tenant (APIs de IA, Chatwoot e Perfex)
     let tenantSettings = null;
-    if (effectiveTenantId && (openaiApiKey !== undefined || groqApiKey !== undefined || chatwootUrl !== undefined || chatwootAccountId !== undefined || chatwootApiToken !== undefined || perfexUrl !== undefined || perfexToken !== undefined || effectiveUazapiHost !== undefined || uazapiAdminToken !== undefined)) {
+    if (effectiveTenantId && (openaiApiKey !== undefined || groqApiKey !== undefined || openrouterApiKey !== undefined || omnirouterApiKey !== undefined || omnirouterUrl !== undefined || chatwootUrl !== undefined || chatwootAccountId !== undefined || chatwootApiToken !== undefined || perfexUrl !== undefined || perfexToken !== undefined || effectiveUazapiHost !== undefined || uazapiAdminToken !== undefined)) {
       tenantSettings = await tenantSettingsService.updateTenantSettings(effectiveTenantId, {
         openaiApiKey,
         groqApiKey,
+        openrouterApiKey,
+        omnirouterApiKey,
+        omnirouterUrl,
         chatwootUrl,
         chatwootAccountId,
         chatwootApiToken,
@@ -225,6 +252,9 @@ export const updateSettings = async (req: AuthenticatedRequest, res: Response) =
       ...globalSettings,
       openaiApiKey: tenantSettings?.openaiApiKey || null,
       groqApiKey: tenantSettings?.groqApiKey || null,
+      openrouterApiKey: (tenantSettings as any)?.openrouterApiKey || null,
+      omnirouterApiKey: (tenantSettings as any)?.omnirouterApiKey || null,
+      omnirouterUrl: (tenantSettings as any)?.omnirouterUrl || 'https://api.omnirouters.com/v1',
       chatwootUrl: tenantSettings?.chatwootUrl || null,
       chatwootAccountId: tenantSettings?.chatwootAccountId || null,
       chatwootApiToken: tenantSettings?.chatwootApiToken || null,

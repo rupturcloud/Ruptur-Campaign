@@ -11,6 +11,9 @@ interface Settings {
   id: string;
   openaiApiKey?: string;
   groqApiKey?: string;
+  openrouterApiKey?: string;
+  omnirouterApiKey?: string;
+  omnirouterUrl?: string;
   chatwootUrl?: string;
   chatwootAccountId?: string;
   chatwootApiToken?: string;
@@ -24,6 +27,9 @@ interface Settings {
 const settingsSchema = z.object({
   openaiApiKey: z.string().optional(),
   groqApiKey: z.string().optional(),
+  openrouterApiKey: z.string().optional(),
+  omnirouterApiKey: z.string().optional(),
+  omnirouterUrl: z.string().optional(),
   chatwootUrl: z.string().optional(),
   chatwootAccountId: z.string().optional(),
   chatwootApiToken: z.string().optional(),
@@ -39,7 +45,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncingUazapi, setSyncingUazapi] = useState(false);
-  const [activeModal, setActiveModal] = useState<'openai' | 'groq' | 'chatwoot' | 'perfex' | 'uazapi' | null>(null);
+  const [activeModal, setActiveModal] = useState<'openai' | 'groq' | 'openrouter' | 'omnirouter' | 'chatwoot' | 'perfex' | 'uazapi' | null>(null);
   const { user } = useAuth();
 
   // Helper para fazer requisições autenticadas
@@ -103,6 +109,9 @@ export function SettingsPage() {
         setSettings(data);
         setValue('openaiApiKey', data.openaiApiKey || '');
         setValue('groqApiKey', data.groqApiKey || '');
+        setValue('openrouterApiKey', data.openrouterApiKey || '');
+        setValue('omnirouterApiKey', data.omnirouterApiKey || '');
+        setValue('omnirouterUrl', data.omnirouterUrl || 'https://api.omnirouters.com/v1');
         setValue('chatwootUrl', data.chatwootUrl || '');
         setValue('chatwootAccountId', data.chatwootAccountId || '');
         setValue('chatwootApiToken', data.chatwootApiToken || '');
@@ -182,10 +191,12 @@ export function SettingsPage() {
     }
   };
 
-  const removeIntegration = async (type: 'openai' | 'groq' | 'chatwoot' | 'perfex' | 'uazapi') => {
+  const removeIntegration = async (type: 'openai' | 'groq' | 'openrouter' | 'omnirouter' | 'chatwoot' | 'perfex' | 'uazapi') => {
     const integrationNames = {
       openai: 'OpenAI',
       groq: 'Groq',
+      openrouter: 'OpenRouter',
+      omnirouter: 'OmniRouter',
       chatwoot: 'Chatwoot',
       perfex: 'Perfex CRM',
       uazapi: 'Uazapi'
@@ -202,6 +213,10 @@ export function SettingsPage() {
         requestData.openaiApiKey = '';
       } else if (type === 'groq') {
         requestData.groqApiKey = '';
+      } else if (type === 'openrouter') {
+        requestData.openrouterApiKey = '';
+      } else if (type === 'omnirouter') {
+        requestData.omnirouterApiKey = '';
       } else if (type === 'chatwoot') {
         requestData.chatwootUrl = '';
         requestData.chatwootAccountId = '';
@@ -372,6 +387,66 @@ export function SettingsPage() {
                     <button
                       onClick={() => setActiveModal('groq')}
                       className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
+                    >
+                      Configurar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* OpenRouter Button */}
+              <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
+                      <span className="text-indigo-600 font-semibold">🌐</span>
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-gray-900">OpenRouter</h3>
+                      <p className="text-sm text-gray-500">Claude, Gemini, DeepSeek, GPT-4o (+300 modelos)</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      settings?.openrouterApiKey
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {settings?.openrouterApiKey ? 'Configurado' : 'Não configurado'}
+                    </span>
+                    <button
+                      onClick={() => setActiveModal('openrouter')}
+                      className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                    >
+                      Configurar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* OmniRouter Button */}
+              <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center">
+                      <span className="text-teal-600 font-semibold">🧭</span>
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-gray-900">OmniRouter</h3>
+                      <p className="text-sm text-gray-500">Roteamento inteligente multi-LLM & failover</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      settings?.omnirouterApiKey
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {settings?.omnirouterApiKey ? 'Configurado' : 'Não configurado'}
+                    </span>
+                    <button
+                      onClick={() => setActiveModal('omnirouter')}
+                      className="px-3 py-1 bg-teal-600 text-white text-sm rounded hover:bg-teal-700"
                     >
                       Configurar
                     </button>
@@ -665,6 +740,156 @@ export function SettingsPage() {
                   type="submit"
                   disabled={isSubmitting}
                   className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal OpenRouter */}
+      {activeModal === 'openrouter' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">🌐 Configurar OpenRouter</h3>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <label htmlFor="openrouterApiKey" className="block text-sm font-medium text-gray-700 mb-1">
+                  API Key OpenRouter *
+                </label>
+                <input
+                  id="openrouterApiKey"
+                  type="password"
+                  {...register('openrouterApiKey')}
+                  placeholder="sk-or-v1-..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {errors.openrouterApiKey && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.openrouterApiKey.message}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Acesse <strong>openrouter.ai/keys</strong> para gerar sua chave unificada para Claude, Gemini, DeepSeek, Llama e GPT.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  Cancelar
+                </button>
+                {settings?.openrouterApiKey && (
+                  <button
+                    type="button"
+                    onClick={() => removeIntegration('openrouter')}
+                    disabled={isSubmitting}
+                    className="flex-1 px-4 py-2 text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50"
+                  >
+                    Remover
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal OmniRouter */}
+      {activeModal === 'omnirouter' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">🧭 Configurar OmniRouter</h3>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div>
+                <label htmlFor="omnirouterUrl" className="block text-sm font-medium text-gray-700 mb-1">
+                  Endpoint Base URL (OmniRouter)
+                </label>
+                <input
+                  id="omnirouterUrl"
+                  type="url"
+                  {...register('omnirouterUrl')}
+                  placeholder="https://api.omnirouters.com/v1"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Padrão oficial: <code>https://api.omnirouters.com/v1</code> (ou informe seu gateway OmniRoute/self-hosted).
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="omnirouterApiKey" className="block text-sm font-medium text-gray-700 mb-1">
+                  API Key OmniRouter *
+                </label>
+                <input
+                  id="omnirouterApiKey"
+                  type="password"
+                  {...register('omnirouterApiKey')}
+                  placeholder="sk-..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                {errors.omnirouterApiKey && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.omnirouterApiKey.message}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Chave de API para roteamento inteligente multi-LLM com fallback automático (ex: modelo <code>auto</code>).
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  Cancelar
+                </button>
+                {settings?.omnirouterApiKey && (
+                  <button
+                    type="button"
+                    onClick={() => removeIntegration('omnirouter')}
+                    disabled={isSubmitting}
+                    className="flex-1 px-4 py-2 text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50"
+                  >
+                    Remover
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Salvando...' : 'Salvar'}
                 </button>
