@@ -77,6 +77,64 @@ function formatSessionPhone(session?: Partial<WhatsAppSession> | null, fallbackN
   return `+${digits}`;
 }
 
+function CircularProgress({
+  percent,
+  size = 38,
+  strokeWidth = 3.5,
+  status = 'PENDING'
+}: {
+  percent: number;
+  size?: number;
+  strokeWidth?: number;
+  status?: string;
+}) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, percent)) / 100) * circumference;
+
+  const colorClass =
+    status === 'COMPLETED'
+      ? 'text-emerald-500'
+      : status === 'RUNNING'
+      ? 'text-blue-500'
+      : status === 'PAUSED'
+      ? 'text-amber-500'
+      : status === 'FAILED'
+      ? 'text-red-500'
+      : 'text-purple-500';
+
+  return (
+    <div className="relative inline-flex items-center justify-center flex-shrink-0" style={{ width: size, height: size }}>
+      <svg className="w-full h-full transform -rotate-90" viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          className="text-gray-200"
+          fill="transparent"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          className={`${colorClass} transition-all duration-500 ease-out`}
+          fill="transparent"
+        />
+      </svg>
+      <span className="absolute text-[10px] font-bold text-gray-700 tracking-tighter">
+        {percent}%
+      </span>
+    </div>
+  );
+}
+
 function SessionAvatar({
   session,
   size = 'md'
@@ -217,9 +275,12 @@ export function CampaignsPage() {
     });
   };
 
-  const loadCampaigns = async () => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const loadCampaigns = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
+      else setIsRefreshing(true);
       const response = await authenticatedFetch('/api/campaigns');
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -228,11 +289,23 @@ export function CampaignsPage() {
       setCampaigns(data.campaigns || []);
     } catch (error) {
       console.error('Erro ao carregar campanhas:', error);
-      toast.error('Erro ao carregar campanhas');
+      if (!silent) toast.error('Erro ao carregar campanhas');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+      setIsRefreshing(false);
     }
   };
+
+  // Polling em tempo real: a cada 3s quando houver campanha em execução (RUNNING ou PENDING), ou a cada 10s caso contrário
+  useEffect(() => {
+    const hasActiveCampaign = campaigns.some(c => c.status === 'RUNNING' || c.status === 'PENDING');
+    const intervalMs = hasActiveCampaign ? 3000 : 10000;
+    const timer = setInterval(() => {
+      // Atualiza de forma silenciosa sem flicker na tela
+      loadCampaigns(true);
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [campaigns]);
 
   const loadContactTags = async () => {
     try {
@@ -909,8 +982,27 @@ export function CampaignsPage() {
 
       <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium text-gray-900">Campanhas Criadas</h3>
+          <div className="px-6 py-3.5 border-b border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-base font-semibold text-gray-900">Campanhas Criadas</h3>
+              {campaigns.some(c => c.status === 'RUNNING') && (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                  Disparando agora
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => loadCampaigns(true)}
+              disabled={isRefreshing}
+              className="text-xs text-gray-500 hover:text-gray-800 flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 hover:bg-gray-50 transition-colors"
+              title="Atualizar lista em tempo real"
+            >
+              <svg className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>{isRefreshing ? 'Atualizando...' : 'Atualizar'}</span>
+            </button>
           </div>
 
           {campaigns.length === 0 ? (
@@ -919,57 +1011,94 @@ export function CampaignsPage() {
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {campaigns.map((campaign) => (
-                <div key={campaign.id} className="px-4 sm:px-6 py-3 flex items-center">
+              {campaigns.map((campaign) => {
+                const total = campaign.totalContacts || 0;
+                const sent = campaign.sentCount || 0;
+                const failed = campaign.failedCount || 0;
+                const percent = total > 0 ? Math.round((sent / total) * 100) : 0;
+                const instancesCount = (campaign.sessionNames && campaign.sessionNames.length > 0)
+                  ? campaign.sessionNames.length
+                  : campaign.sessionName ? 1 : 0;
+
+                // Tooltip resumido de instâncias com nomes
+                const instancesTooltip = (campaign.sessionNames && campaign.sessionNames.length > 0)
+                  ? campaign.sessionNames.map(s => {
+                      const matched = whatsappSessions.find(ws => ws.name === s) || (campaign.session?.name === s ? campaign.session : undefined);
+                      const phone = formatSessionPhone(matched, s);
+                      const lbl = matched?.displayName || matched?.mePushName || s;
+                      return `${lbl}${phone ? ' (' + phone + ')' : ''}`;
+                    }).join(', ')
+                  : 'Nenhuma instância vinculada';
+
+                return (
+                <div key={campaign.id} className="px-4 sm:px-6 py-3.5 hover:bg-gray-50/70 transition-colors">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full">
-                    {/* Nome e Status */}
+                    {/* Nome, Status e Instâncias Resumidas */}
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <h4 className="text-sm font-medium text-gray-900 truncate">{campaign.nome}</h4>
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(campaign.status)}`}>
-                        {getStatusText(campaign.status)}
-                      </span>
-                    </div>
+                      {/* Mini Pizza / Donut de Progresso */}
+                      <CircularProgress percent={percent} status={campaign.status} size={40} strokeWidth={4} />
 
-                    {/* Informações essenciais */}
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600">
-                      <div className="flex items-center gap-1">
-                        <span className="font-medium">Contatos:</span>
-                        <span>{campaign.totalContacts}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="font-medium">Enviados:</span>
-                        <span>{campaign.sentCount}/{campaign.totalContacts}</span>
-                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-semibold text-gray-900 truncate max-w-xs sm:max-w-md" title={campaign.nome}>
+                            {campaign.nome}
+                          </h4>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(campaign.status)}`}>
+                            {campaign.status === 'RUNNING' && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping mr-1"></span>
+                            )}
+                            {getStatusText(campaign.status)}
+                          </span>
 
-                      {/* Instâncias vinculadas com foto e telefone */}
-                      {campaign.sessionNames && campaign.sessionNames.length > 0 && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-gray-500">Instâncias ({campaign.sessionNames.length}):</span>
-                          <div className="flex flex-wrap items-center gap-1">
-                            {campaign.sessionNames.slice(0, 3).map((sName, index) => {
-                              const matched = whatsappSessions.find(ws => ws.name === sName) || (campaign.session?.name === sName ? campaign.session : undefined);
-                              const phoneStr = formatSessionPhone(matched, sName);
-                              const displayLabel = matched?.displayName || matched?.mePushName || sName;
-                              return (
-                                <span
-                                  key={index}
-                                  title={`${displayLabel}${phoneStr ? ' • ' + phoneStr : ''}`}
-                                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-900 border border-emerald-200"
-                                >
-                                  <SessionAvatar session={matched || { name: sName }} size="sm" />
-                                  <span className="font-medium max-w-[100px] truncate">{displayLabel}</span>
-                                  {phoneStr && <span className="font-mono text-[11px] text-emerald-700 hidden md:inline">{phoneStr}</span>}
-                                </span>
-                              );
-                            })}
-                            {campaign.sessionNames.length > 3 && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200">
-                                +{campaign.sessionNames.length - 3} instâncias
-                              </span>
+                          {/* Badge resumido de instâncias: limpo e direto */}
+                          {instancesCount > 0 ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help"
+                              title={`Instâncias vinculadas: ${instancesTooltip}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              <span>{instancesCount} {instancesCount === 1 ? 'instância' : 'instâncias'}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">Sem instâncias</span>
+                          )}
+                        </div>
+
+                        {/* Barra de Progresso Horizontal em Tempo Real */}
+                        <div className="mt-2 flex items-center gap-3 max-w-md">
+                          <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden border border-gray-200">
+                            <div className="h-full flex">
+                              <div
+                                style={{ width: `${percent}%` }}
+                                className={`transition-all duration-500 ${
+                                  campaign.status === 'COMPLETED'
+                                    ? 'bg-emerald-500'
+                                    : campaign.status === 'RUNNING'
+                                    ? 'bg-blue-600'
+                                    : campaign.status === 'PAUSED'
+                                    ? 'bg-amber-500'
+                                    : 'bg-indigo-500'
+                                }`}
+                              />
+                              {failed > 0 && total > 0 && (
+                                <div
+                                  style={{ width: `${Math.min(100 - percent, Math.round((failed / total) * 100))}%` }}
+                                  className="bg-red-500 transition-all duration-500"
+                                  title={`${failed} falhas`}
+                                />
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-[11px] font-medium text-gray-600 whitespace-nowrap flex items-center gap-1.5">
+                            <span className="text-gray-900 font-bold">{sent}</span>
+                            <span className="text-gray-400">/</span>
+                            <span>{total} contatos</span>
+                            {failed > 0 && (
+                              <span className="text-red-600 font-semibold text-[10px]">({failed} falhas)</span>
                             )}
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
 
                     {/* Botões de ação */}
@@ -1035,7 +1164,8 @@ export function CampaignsPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>
