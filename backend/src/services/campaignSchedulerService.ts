@@ -293,14 +293,29 @@ class CampaignSchedulerService {
         return; // Pular este envio
       }
 
-      // Buscar dados do contato para variáveis dinâmicas usando ContactService
-      const contactsResponse = await ContactService.getContacts();
-      const contact = message.contactId ? contactsResponse.contacts.find((c: any) => c.id === message.contactId) : undefined;
+      // Buscar dados do contato para variáveis dinâmicas diretamente do banco
+      let contact: any = null;
+      if (message.contactId) {
+        contact = await prisma.contact.findUnique({
+          where: { id: message.contactId },
+          include: { categoria: true }
+        });
+      }
+      if (!contact) {
+        contact = {
+          id: message.contactId || null,
+          nome: message.contactName || '',
+          telefone: message.contactPhone || '',
+          email: '',
+          observacoes: '',
+          categoria: null
+        };
+      }
 
-      console.log(`🔍 CONTACT FOUND:`, contact);
+      console.log(`🔍 CONTACT FOUND:`, { id: contact.id, nome: contact.nome, telefone: contact.telefone });
 
-      // Depois aplicar variáveis dinâmicas se houver contato
-      const processedContent = contact ? this.processVariables(contentWithSelectedVariation, contact) : contentWithSelectedVariation;
+      // Aplicar variáveis dinâmicas em todo o conteúdo
+      const processedContent = this.processVariables(contentWithSelectedVariation, contact);
 
       console.log(`🔍 PROCESSED CONTENT:`, processedContent);
 
@@ -453,24 +468,24 @@ class CampaignSchedulerService {
   }
 
   private processVariables(content: any, contact: any): any {
-    console.log(`🔧 PROCESSING VARIABLES for contact:`, contact);
+    if (!content) return content;
+    const contactData = contact || {};
+    const nome = contactData.nome || '';
+    const telefone = contactData.telefone || '';
+    const email = contactData.email || '';
+    const observacoes = contactData.observacoes || '';
+    const categoria = contactData.categoria?.nome || contactData.categoriaNome || '';
 
     const replaceVariables = (text: string): string => {
       if (typeof text !== 'string') return text;
 
-      console.log(`🔧 Original text:`, text);
-
-      let result = text;
-      // Usar replace simples ao invés de regex
-      result = result.replace(/\{\{nome\}\}/g, contact.nome || '');
-      result = result.replace(/\{\{telefone\}\}/g, contact.telefone || '');
-      result = result.replace(/\{\{email\}\}/g, contact.email || '');
-      result = result.replace(/\{\{observacoes\}\}/g, contact.observacoes || '');
-      result = result.replace(/\{\{categoria\}\}/g, ''); // Por enquanto vazio
-
-      console.log(`🔧 Processed text:`, result);
-
-      return result;
+      // Substitui {{nome}}, {nome}, {{ nome }}, etc. de forma case-insensitive
+      return text
+        .replace(/\{\{\s*nome\s*\}\}|\{\s*nome\s*\}/gi, nome)
+        .replace(/\{\{\s*telefone\s*\}\}|\{\s*telefone\s*\}/gi, telefone)
+        .replace(/\{\{\s*email\s*\}\}|\{\s*email\s*\}/gi, email)
+        .replace(/\{\{\s*observacoes\s*\}\}|\{\s*observacoes\s*\}/gi, observacoes)
+        .replace(/\{\{\s*categoria\s*\}\}|\{\s*categoria\s*\}/gi, categoria);
     };
 
     const processObject = (obj: any): any => {
