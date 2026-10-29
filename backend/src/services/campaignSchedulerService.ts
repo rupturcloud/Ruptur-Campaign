@@ -90,7 +90,7 @@ class CampaignSchedulerService {
           session: true,
           messages: {
             where: { status: 'PENDING' }, // Only PENDING, not PROCESSING to avoid duplicates
-            orderBy: { criadoEm: 'asc' },
+            orderBy: [{ priority: 'asc' }, { criadoEm: 'asc' }], // Respeita a ordem de prioridade das listas
             take: 1 // Processar uma mensagem por vez
           }
         }

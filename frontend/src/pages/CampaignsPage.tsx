@@ -171,6 +171,8 @@ export function CampaignsPage() {
   const [uploadingFiles, setUploadingFiles] = useState<{ [key: number]: boolean }>({});
   const [fileInfos, setFileInfos] = useState<{ [key: number]: { name: string, size: number, type: string } }>({});
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [draggedTagIndex, setDraggedTagIndex] = useState<number | null>(null);
+  const [dragOverTagIndex, setDragOverTagIndex] = useState<number | null>(null);
   const [sessionSearch, setSessionSearch] = useState('');
   const [sessionFilterTab, setSessionFilterTab] = useState<'all' | 'selected' | 'unselected'>('all');
 
@@ -281,8 +283,44 @@ export function CampaignsPage() {
       ...prev,
       targetTags: prev.targetTags.length === contactTags.length
         ? []
-        : contactTags.map(tag => tag.id)
+        : [...prev.targetTags, ...contactTags.map(tag => tag.id).filter(id => !prev.targetTags.includes(id))]
     }));
+  };
+
+  // Reordenação (prioridade de envio) das listas selecionadas
+  const moveTag = (from: number, to: number) => {
+    setFormData(prev => {
+      if (from === to || from < 0 || to < 0 || from >= prev.targetTags.length || to >= prev.targetTags.length) return prev;
+      const next = [...prev.targetTags];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return { ...prev, targetTags: next };
+    });
+  };
+
+  const handleTagDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedTagIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleTagDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverTagIndex !== index) setDragOverTagIndex(index);
+  };
+
+  const handleTagDrop = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    const from = draggedTagIndex ?? Number(e.dataTransfer.getData('text/plain'));
+    if (!Number.isNaN(from)) moveTag(from, index);
+    setDraggedTagIndex(null);
+    setDragOverTagIndex(null);
+  };
+
+  const handleTagDragEnd = () => {
+    setDraggedTagIndex(null);
+    setDragOverTagIndex(null);
   };
 
   const handleSelectAllSessions = () => {
@@ -1063,13 +1101,76 @@ export function CampaignsPage() {
                           </button>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500 mb-3">Selecione quais categorias de contatos receberão a campanha</p>
+                      <p className="text-xs text-gray-500 mb-3">Selecione as listas e arraste para definir a prioridade de envio (a #1 é disparada primeiro)</p>
+
+                      {/* Listas selecionadas — ordenáveis por arrastar e soltar */}
+                      {formData.targetTags.length > 0 && (
+                        <div className="mb-3 border border-blue-200 rounded-md p-2 bg-blue-50/50">
+                          <div className="flex items-center justify-between px-1 mb-1.5">
+                            <span className="text-[11px] font-semibold text-blue-900 uppercase tracking-wide">Ordem de prioridade de envio</span>
+                            <span className="text-[11px] text-blue-700">⇅ clique e arraste</span>
+                          </div>
+                          <ul className="space-y-1.5">
+                            {formData.targetTags.map((tagId, index) => {
+                              const tag = contactTags.find(t => t.id === tagId);
+                              const isDragging = draggedTagIndex === index;
+                              const isOver = dragOverTagIndex === index && draggedTagIndex !== null && draggedTagIndex !== index;
+                              return (
+                                <li
+                                  key={tagId}
+                                  draggable
+                                  onDragStart={(e) => handleTagDragStart(e, index)}
+                                  onDragOver={(e) => handleTagDragOver(e, index)}
+                                  onDragLeave={() => setDragOverTagIndex(null)}
+                                  onDrop={(e) => handleTagDrop(e, index)}
+                                  onDragEnd={handleTagDragEnd}
+                                  className={`flex items-center gap-2 p-2 rounded-md bg-white border select-none cursor-grab active:cursor-grabbing transition-all ${
+                                    isDragging ? 'opacity-40 border-blue-300' : 'border-gray-200 hover:border-blue-300'
+                                  } ${isOver ? 'ring-2 ring-blue-400 border-blue-400' : ''}`}
+                                >
+                                  <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                    <path d="M7 4a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm0 6a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm-1.5 7.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM16 4a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm-1.5 7.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm1.5 4.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+                                  </svg>
+                                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                                    {index + 1}
+                                  </span>
+                                  <span className="text-sm text-gray-800 font-medium flex-1 truncate">{tag?.nome || 'Categoria removida'}</span>
+                                  <div className="flex items-center gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => moveTag(index, index - 1)}
+                                      disabled={index === 0}
+                                      className="p-1 text-gray-400 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                                      title="Subir prioridade"
+                                    >▲</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => moveTag(index, index + 1)}
+                                      disabled={index === formData.targetTags.length - 1}
+                                      className="p-1 text-gray-400 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                                      title="Descer prioridade"
+                                    >▼</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleTagToggle(tagId)}
+                                      className="p-1 text-gray-400 hover:text-red-600"
+                                      title="Remover da campanha"
+                                    >✕</button>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Listas disponíveis (não selecionadas) */}
                       <div className="max-h-40 overflow-y-auto border border-gray-300 rounded-md p-3 bg-gray-50">
-                        {contactTags.map((tag) => (
+                        {contactTags.filter(tag => !formData.targetTags.includes(tag.id)).map((tag) => (
                           <label key={tag.id} className="flex items-center space-x-2 mb-2 p-2 rounded hover:bg-white cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={formData.targetTags.includes(tag.id)}
+                              checked={false}
                               onChange={() => handleTagToggle(tag.id)}
                               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                             />
@@ -1079,9 +1180,12 @@ export function CampaignsPage() {
                         {contactTags.length === 0 && (
                           <p className="text-sm text-gray-500 text-center py-4">Nenhuma categoria disponível</p>
                         )}
+                        {contactTags.length > 0 && contactTags.every(tag => formData.targetTags.includes(tag.id)) && (
+                          <p className="text-xs text-gray-500 text-center py-2">Todas as listas já foram adicionadas</p>
+                        )}
                       </div>
                       {formData.targetTags.length > 0 && (
-                        <p className="text-xs text-green-600 mt-2">✅ {formData.targetTags.length} categoria(s) selecionada(s)</p>
+                        <p className="text-xs text-green-600 mt-2">✅ {formData.targetTags.length} categoria(s) selecionada(s) · envio na ordem de prioridade acima; números manuais entram por último</p>
                       )}
                     </div>
 

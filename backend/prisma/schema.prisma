@@ -260,6 +260,7 @@ model CampaignMessage {
   criadoEm          DateTime  @default(now()) @map("criado_em")
   atualizadoEm      DateTime  @updatedAt @map("atualizado_em")
   sessionName       String?   @map("session_name")
+  priority          Int       @default(0) @map("priority") // Ordem de prioridade da lista/categoria (0 = primeira)
   campaign          Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   // Relations

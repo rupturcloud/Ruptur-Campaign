@@ -23,6 +23,55 @@ function parseManualPhones(value: unknown): string[] {
 }
 
 // Validation rules
+
+// Ordena contatos pela prioridade das listas (ordem em targetTags). Manuais ficam por último.
+// Em caso de telefone duplicado, prevalece a lista de maior prioridade (menor índice).
+function orderContactsByTagPriority(
+  filteredContacts: Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }>,
+  manualContacts: Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }>,
+  targetTags: string[]
+): Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null; priority: number }> {
+  const tagIndex = new Map<string, number>();
+  (targetTags || []).forEach((tag, idx) => tagIndex.set(tag, idx));
+  const manualPriority = (targetTags || []).length;
+
+  const withPriority = [
+    ...filteredContacts.map(c => ({
+      ...c,
+      priority: c.categoriaId && tagIndex.has(c.categoriaId) ? (tagIndex.get(c.categoriaId) as number) : manualPriority
+    })),
+    ...manualContacts.map(c => ({ ...c, priority: manualPriority }))
+  ];
+
+  // sort estável: mantém ordem original dentro da mesma prioridade
+  withPriority.sort((a, b) => a.priority - b.priority);
+
+  const byPhone = new Map<string, any>();
+  for (const contact of withPriority) {
+    if (!byPhone.has(contact.telefone)) {
+      byPhone.set(contact.telefone, contact);
+    }
+  }
+  return [...byPhone.values()];
+}
+
+// Atualiza a prioridade das mensagens PENDING conforme a nova ordem das listas
+async function reprioritizePendingMessages(campaignId: string, targetTags: string[], tenantId?: string) {
+  for (let idx = 0; idx < targetTags.length; idx++) {
+    const contacts = await prisma.contact.findMany({
+      where: { categoriaId: targetTags[idx], ...(tenantId ? { tenantId } : {}) },
+      select: { id: true }
+    });
+    const ids = contacts.map(c => c.id);
+    if (ids.length === 0) continue;
+    await prisma.campaignMessage.updateMany({
+      where: { campaignId, status: 'PENDING', contactId: { in: ids } },
+      data: { priority: idx }
+    });
+  }
+  console.log(`🔀 Mensagens pendentes da campanha ${campaignId} repriorizadas conforme nova ordem das listas`);
+}
+
 export const campaignValidation = [
   body('nome').notEmpty().withMessage('Nome da campanha é obrigatório'),
   body('targetTags').optional().isArray().withMessage('Categorias dos contatos devem ser um array'),
@@ -272,9 +321,8 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
         const existing = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
         manualContacts.push(existing ? existing : { id: null, nome: `Lead ${phone}`, telefone: phone, categoriaId: null });
       }
-      const contactsByPhone = new Map<string, any>();
-      [...filteredContacts, ...manualContacts].forEach(contact => contactsByPhone.set(contact.telefone, contact));
-      campaignContacts = [...contactsByPhone.values()];
+      // Ordenar pela prioridade das listas (ordem do array targetTags) e deduplicar mantendo a maior prioridade
+      campaignContacts = orderContactsByTagPriority(filteredContacts, manualContacts, targetTags || []);
       console.log(`📊 Contatos encontrados com categorias:`, filteredContacts.length, '· manuais:', manualContacts.length);
 
       if (!isDraft && campaignContacts.length === 0) {
@@ -310,7 +358,8 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
         contactId: contact.id,
         contactPhone: contact.telefone,
         contactName: contact.nome,
-        tenantId: campaign.tenantId
+        tenantId: campaign.tenantId,
+        priority: contact.priority ?? 0
       }));
       await prisma.campaignMessage.createMany({
         data: campaignMessages
@@ -432,23 +481,40 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
         manualContacts.push(found ? found : { id: null, nome: `Lead ${phone}`, telefone: phone, categoriaId: null });
       }
 
-      const contactsByPhone = new Map<string, any>();
-      [...filteredContacts, ...manualContacts].forEach(contact => contactsByPhone.set(contact.telefone, contact));
-      const newContacts = [...contactsByPhone.values()];
+      const newContacts = orderContactsByTagPriority(filteredContacts, manualContacts, activeTags);
 
       if (newContacts.length > 0 && (['DRAFT', 'PENDING', 'PAUSED'].includes(existing.status) || existing.sentCount === 0)) {
         await prisma.campaignMessage.deleteMany({ where: { campaignId: id } });
-        const newMessages = newContacts.map(contact => ({
+        const newMessages = newContacts.map((contact: any) => ({
           campaignId: id,
           contactId: contact.id,
           contactPhone: contact.telefone,
           contactName: contact.nome,
-          tenantId: existing.tenantId
+          tenantId: existing.tenantId,
+          priority: contact.priority ?? 0
         }));
         await prisma.campaignMessage.createMany({ data: newMessages });
         updateData.totalContacts = newContacts.length;
         updateData.sentCount = 0;
         updateData.failedCount = 0;
+      }
+    }
+
+    // Se apenas a ordem das listas mudou (mesmas categorias), repriorizar mensagens pendentes sem recriar
+    if (
+      !hasNewManualPhones &&
+      Array.isArray(targetTags) &&
+      targetTags.length > 0 &&
+      hasTagsChange
+    ) {
+      try {
+        const previousTags: string[] = JSON.parse(existing.targetTags || '[]');
+        const sameSet = previousTags.length === targetTags.length && previousTags.every((t: string) => targetTags.includes(t));
+        if (sameSet) {
+          await reprioritizePendingMessages(id, targetTags, req.tenantId);
+        }
+      } catch (reorderError) {
+        console.warn('⚠️ Falha ao repriorizar mensagens pendentes:', reorderError);
       }
     }
 
