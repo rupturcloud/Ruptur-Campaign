@@ -10,6 +10,7 @@ import { openrouterService } from './openrouterService';
 import { omnirouterService } from './omnirouterService';
 import { websocketService } from './websocketService';
 import { automationService, TriggerType } from './automationService';
+import { sessionBreaker, retryBudget, decideOnFailure } from './dispatchGuard';
 
 const prisma = new PrismaClient();
 
@@ -137,10 +138,10 @@ class CampaignSchedulerService {
     }
   }
 
-  // Função para obter próxima sessão de forma sequencial (round-robin) com informações do provedor
+  // Função para obter próxima sessão de forma sequencial (round-robin) com Circuit Breaker ativo
   private async getNextSequentialSession(campaignId: string, sessionNames: string[]): Promise<{name: string, provider: string} | null> {
     try {
-      // Buscar sessões ativas
+      // Buscar sessões ativas no banco
       const activeSessions = await prisma.whatsAppSession.findMany({
         where: {
           name: { in: sessionNames },
@@ -161,16 +162,24 @@ class CampaignSchedulerService {
         return null;
       }
 
+      // Filtrar sessões saudáveis pelo Circuit Breaker (ignora instâncias com circuito ABERTO)
+      const healthySessions = activeSessions.filter(s => sessionBreaker.canUse(s.name));
+
+      if (healthySessions.length === 0) {
+        console.log(`🛑 [Circuit Breaker] Todas as sessões ativas estão em quarentena de corte de ignição: ${sessionNames.join(', ')}`);
+        return null;
+      }
+
       // Obter índice atual da campanha (ou inicializar em 0)
       const currentIndex = this.campaignSessionIndexes.get(campaignId) || 0;
 
-      // Selecionar sessão baseada no índice atual
-      const selectedSession = activeSessions[currentIndex % activeSessions.length];
+      // Selecionar sessão baseada no índice atual entre as saudáveis
+      const selectedSession = healthySessions[currentIndex % healthySessions.length];
 
       // Incrementar índice para próxima mensagem
       this.campaignSessionIndexes.set(campaignId, currentIndex + 1);
 
-      console.log(`🔄 Sessão sequencial: ${selectedSession.name} (${selectedSession.provider}) (índice ${currentIndex + 1}/${activeSessions.length} - sessões ativas: ${activeSessions.map(s => `${s.name}(${s.provider})`).join(', ')})`);
+      console.log(`🔄 Sessão sequencial: ${selectedSession.name} (${selectedSession.provider}) (índice ${currentIndex + 1}/${healthySessions.length} - saudáveis: ${healthySessions.map(s => `${s.name}(${s.provider})`).join(', ')})`);
 
       return {
         name: selectedSession.name,
@@ -341,19 +350,63 @@ class CampaignSchedulerService {
       // Verificar se o número existe no WhatsApp antes de enviar usando provedor correto
       let contactCheck: any = { exists: false };
 
-      if (provider === 'UAZAPI') {
-        contactCheck = await uazapiService.checkContact(selectedSession, message.contactPhone, campaign.tenantId);
-      } else if (provider === 'EVOLUTION') {
-        contactCheck = await checkContactExistsEvolution(selectedSession, message.contactPhone);
-      } else if (provider === 'QUEPASA') {
-        contactCheck = await checkContactExistsQuepasa(selectedSession, message.contactPhone, sessionToken);
-      } else {
-        contactCheck = await checkContactExists(selectedSession, message.contactPhone);
+      try {
+        if (provider === 'UAZAPI') {
+          contactCheck = await uazapiService.checkContact(selectedSession, message.contactPhone, campaign.tenantId);
+        } else if (provider === 'EVOLUTION') {
+          contactCheck = await checkContactExistsEvolution(selectedSession, message.contactPhone);
+        } else if (provider === 'QUEPASA') {
+          contactCheck = await checkContactExistsQuepasa(selectedSession, message.contactPhone, sessionToken);
+        } else {
+          contactCheck = await checkContactExists(selectedSession, message.contactPhone);
+        }
+      } catch (checkErr: any) {
+        const errorMsg = checkErr?.message || String(checkErr);
+        const attempts = retryBudget.get(message.id);
+        const decision = decideOnFailure(errorMsg, 'CHECK', campaign.messageType, attempts);
+
+        if (decision.strike) {
+          const opened = sessionBreaker.recordFailure(selectedSession, errorMsg);
+          if (opened) {
+            console.warn(`🚨 [Circuit Breaker] Sessão ${selectedSession} ABERTA após falhas consecutivas na checagem (${errorMsg})`);
+          }
+        }
+
+        if (decision.requeue) {
+          const nextAttempt = retryBudget.consume(message.id);
+          console.warn(`♻️ [Lead Protegido] Checagem de contato falhou por infraestrutura na sessão ${selectedSession} (${errorMsg}). Re-enfileirando mensagem ${message.id} (tentativa ${nextAttempt}).`);
+          await prisma.campaignMessage.update({
+            where: { id: message.id },
+            data: {
+              status: 'PENDING',
+              errorMessage: `Re-enfileirada: erro temporário na checagem via ${selectedSession} (${errorMsg})`
+            }
+          });
+          return;
+        }
+
+        // Falha definitiva
+        console.error(`❌ [Checagem Falhou] Falha irrecuperável na checagem para ${message.contactPhone}: ${errorMsg}`);
+        retryBudget.clear(message.id);
+        await prisma.campaignMessage.update({
+          where: { id: message.id },
+          data: {
+            status: 'FAILED',
+            errorMessage: `Erro na checagem: ${errorMsg}`,
+            selectedVariation: selectedVariationInfo
+          }
+        });
+        await prisma.campaign.update({
+          where: { id: campaign.id },
+          data: { failedCount: { increment: 1 } }
+        });
+        return;
       }
 
       if (!contactCheck.exists) {
         console.log(`❌ Contact ${message.contactPhone} does not exist on WhatsApp (${provider}). Skipping message.`);
 
+        retryBudget.clear(message.id);
         // Marcar como falha por número inexistente
         await prisma.campaignMessage.update({
           where: { id: message.id },
@@ -419,6 +472,10 @@ class CampaignSchedulerService {
       }
 
       if (result.success) {
+        // Sucesso fecha o circuit breaker e limpa orçamento de retry
+        sessionBreaker.recordSuccess(selectedSession);
+        retryBudget.clear(message.id);
+
         // Atualizar status da mensagem
         await prisma.campaignMessage.update({
           where: { id: message.id },
@@ -441,12 +498,37 @@ class CampaignSchedulerService {
 
         console.log(`Message sent successfully to ${message.contactPhone}`);
       } else {
-        // Marcar como falha
+        const errorMsg = result.error || 'Erro no envio';
+        const attempts = retryBudget.get(message.id);
+        const decision = decideOnFailure(errorMsg, 'SEND', campaign.messageType, attempts);
+
+        if (decision.strike) {
+          const opened = sessionBreaker.recordFailure(selectedSession, errorMsg);
+          if (opened) {
+            console.warn(`🚨 [Circuit Breaker] Sessão ${selectedSession} ABERTA após falha de envio (${errorMsg})`);
+          }
+        }
+
+        if (decision.requeue) {
+          const nextAttempt = retryBudget.consume(message.id);
+          console.warn(`♻️ [Lead Protegido] Falha de infraestrutura no envio via ${selectedSession} (${errorMsg}). Re-enfileirando mensagem ${message.id} (tentativa ${nextAttempt}).`);
+          await prisma.campaignMessage.update({
+            where: { id: message.id },
+            data: {
+              status: 'PENDING',
+              errorMessage: `Re-enfileirada: erro temporário de envio via ${selectedSession} (${errorMsg})`
+            }
+          });
+          return;
+        }
+
+        // Falha permanente ou orçamento esgotado
+        retryBudget.clear(message.id);
         await prisma.campaignMessage.update({
           where: { id: message.id },
           data: {
             status: 'FAILED',
-            errorMessage: result.error,
+            errorMessage: errorMsg,
             sessionName: selectedSession, // Registrar qual sessão foi tentada
             selectedVariation: selectedVariationInfo // Registrar qual variação foi selecionada
           }
@@ -460,18 +542,42 @@ class CampaignSchedulerService {
           }
         });
 
-        console.error(`Failed to send message to ${message.contactPhone}: ${result.error}`);
+        console.error(`Failed to send message to ${message.contactPhone}: ${errorMsg}`);
       }
     } catch (error) {
       console.error(`Error processing message ${message.id}:`, error);
 
-      // Check if message was marked as PROCESSING - if so, mark as FAILED
-      // If it's still PENDING somehow, mark as FAILED
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      const sessionName = selectedSessionInfo?.name;
+      const attempts = retryBudget.get(message.id);
+      const decision = decideOnFailure(errorMsg, 'SEND', campaign?.messageType || 'text', attempts);
+
+      if (sessionName && decision.strike) {
+        const opened = sessionBreaker.recordFailure(sessionName, errorMsg);
+        if (opened) {
+          console.warn(`🚨 [Circuit Breaker] Sessão ${sessionName} ABERTA após exceção (${errorMsg})`);
+        }
+      }
+
+      if (decision.requeue) {
+        const nextAttempt = retryBudget.consume(message.id);
+        console.warn(`♻️ [Lead Protegido] Exceção de infraestrutura ao processar ${message.id}. Re-enfileirando (tentativa ${nextAttempt}).`);
+        await prisma.campaignMessage.update({
+          where: { id: message.id },
+          data: {
+            status: 'PENDING',
+            errorMessage: `Re-enfileirada após exceção: ${errorMsg}`
+          }
+        });
+        return;
+      }
+
+      retryBudget.clear(message.id);
       await prisma.campaignMessage.update({
         where: { id: message.id },
         data: {
           status: 'FAILED',
-          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          errorMessage: errorMsg,
           sessionName: selectedSessionInfo?.name || 'N/A', // Registrar a sessão se disponível
           selectedVariation: selectedVariationInfo || null // Registrar variação se disponível
         }

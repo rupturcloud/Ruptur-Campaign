@@ -10,7 +10,8 @@ import {
   downloadCampaignReport,
   getContactTags,
   getActiveSessions,
-  campaignValidation
+  campaignValidation,
+  getCampaignLiveTelemetry
 } from '../controllers/campaignController';
 import { authMiddleware } from '../middleware/auth';
 import { checkCampaignQuota } from '../middleware/quotaMiddleware';
@@ -23,6 +24,8 @@ router.get('/tags', authMiddleware, getContactTags);
 router.get('/sessions', authMiddleware, getActiveSessions);
 router.get('/:id', authMiddleware, getCampaign);
 router.get('/:id/report', authMiddleware, getCampaignReport);
+router.get('/:id/telemetry/live', authMiddleware, getCampaignLiveTelemetry);
+router.get('/:id/dyno', authMiddleware, getCampaignLiveTelemetry);
 router.get('/:id/report/download', authMiddleware, downloadCampaignReport);
 router.post('/', authMiddleware, campaignValidation, checkCampaignQuota, createCampaign);
 router.put('/:id', authMiddleware, updateCampaign);

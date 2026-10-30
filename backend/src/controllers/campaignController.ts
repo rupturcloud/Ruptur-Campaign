@@ -5,6 +5,7 @@ import { ContactService } from '../services/contactService';
 import { CategoryService } from '../services/categoryService';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { uazapiService } from '../services/uazapiService';
+import { sessionBreaker, classifyDispatchError } from '../services/dispatchGuard';
 
 const prisma = new PrismaClient();
 
@@ -950,5 +951,250 @@ export const downloadCampaignReport = async (req: AuthenticatedRequest, res: Res
   } catch (error) {
     console.error('Erro ao gerar XLSX:', error);
     res.status(500).json({ error: 'Erro ao gerar relatório XLSX' });
+  }
+};
+
+
+// Telemetria Dinamometro em Tempo Real (Performance do Motor de Disparos)
+export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const where: any = { id };
+    if (req.user?.role !== 'SUPERADMIN' && req.tenantId) {
+      where.OR = [
+        { tenantId: req.tenantId },
+        { tenantId: null }
+      ];
+    }
+
+    const campaign = await prisma.campaign.findFirst({
+      where,
+      select: {
+        id: true,
+        nome: true,
+        status: true,
+        messageType: true,
+        sessionName: true,
+        sessionNames: true,
+        totalContacts: true,
+        sentCount: true,
+        failedCount: true,
+        randomDelay: true,
+        startedAt: true,
+        completedAt: true,
+        criadoEm: true,
+        tenantId: true
+      }
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campanha não encontrada' });
+    }
+
+    const now = new Date();
+    const fiveMinAgo = new Date(now.getTime() - 5 * 60_000);
+    const fifteenMinAgo = new Date(now.getTime() - 15 * 60_000);
+
+    // Contagem real das mensagens agrupadas por status
+    const statusCounts = await prisma.campaignMessage.groupBy({
+      by: ['status'],
+      where: { campaignId: id },
+      _count: { status: true }
+    });
+
+    const counts: Record<string, number> = {
+      PENDING: 0,
+      PROCESSING: 0,
+      SENT: 0,
+      FAILED: 0
+    };
+    for (const sc of statusCounts) {
+      counts[sc.status] = sc._count.status;
+    }
+
+    // Contagem de envios recentes para RPM global
+    const sentLast5Min = await prisma.campaignMessage.count({
+      where: {
+        campaignId: id,
+        status: 'SENT',
+        sentAt: { gte: fiveMinAgo }
+      }
+    });
+
+    const sentLast15Min = await prisma.campaignMessage.count({
+      where: {
+        campaignId: id,
+        status: 'SENT',
+        sentAt: { gte: fifteenMinAgo }
+      }
+    });
+
+    const rpm5Min = Number((sentLast5Min / 5).toFixed(2));
+    const rpm15Min = Number((sentLast15Min / 15).toFixed(2));
+
+    // Sessoes configuradas na campanha
+    let configuredSessionNames: string[] = [];
+    try {
+      if (campaign.sessionNames) {
+        configuredSessionNames = JSON.parse(campaign.sessionNames);
+      } else if (campaign.sessionName) {
+        configuredSessionNames = [campaign.sessionName];
+      }
+    } catch {
+      configuredSessionNames = campaign.sessionName ? [campaign.sessionName] : [];
+    }
+
+    // Mensagens agrupadas por sessao e status
+    const sessionStatsAgg = await prisma.campaignMessage.groupBy({
+      by: ['sessionName', 'status'],
+      where: {
+        campaignId: id,
+        sessionName: { not: null }
+      },
+      _count: { _all: true }
+    });
+
+    // Envios recentes por sessao (ultimos 5 min)
+    const sessionRecentSent = await prisma.campaignMessage.groupBy({
+      by: ['sessionName'],
+      where: {
+        campaignId: id,
+        status: 'SENT',
+        sentAt: { gte: fiveMinAgo },
+        sessionName: { not: null }
+      },
+      _count: { _all: true }
+    });
+    const recentSentMap = new Map<string, number>();
+    for (const rs of sessionRecentSent) {
+      if (rs.sessionName) recentSentMap.set(rs.sessionName, rs._count._all);
+    }
+
+    const allDispatchedSessions = new Set<string>(configuredSessionNames);
+    for (const row of sessionStatsAgg) {
+      if (row.sessionName) allDispatchedSessions.add(row.sessionName);
+    }
+
+    // Metadados de sessoes no banco
+    const sessionRecords = await prisma.whatsAppSession.findMany({
+      where: { name: { in: Array.from(allDispatchedSessions) } },
+      select: {
+        name: true,
+        status: true,
+        provider: true,
+        mePushName: true,
+        atualizadoEm: true
+      }
+    });
+    const sessionRecordMap = new Map(sessionRecords.map(s => [s.name, s]));
+
+    // Cilindros do motor (uma entrada por instancia)
+    const cylinders = Array.from(allDispatchedSessions).map(sessionName => {
+      const record = sessionRecordMap.get(sessionName);
+      const breakerSnap = sessionBreaker.snapshot(sessionName);
+
+      let sent = 0;
+      let failed = 0;
+      let pending = 0;
+      for (const row of sessionStatsAgg) {
+        if (row.sessionName === sessionName) {
+          if (row.status === 'SENT') sent += row._count._all;
+          if (row.status === 'FAILED') failed += row._count._all;
+          if (row.status === 'PENDING') pending += row._count._all;
+        }
+      }
+
+      const sessionSent5 = recentSentMap.get(sessionName) || 0;
+      const sessionRpm = Number((sessionSent5 / 5).toFixed(2));
+
+      return {
+        sessionName,
+        provider: record?.provider || 'WAHA',
+        dbStatus: record?.status || 'UNKNOWN',
+        mePushName: record?.mePushName || null,
+        circuit: {
+          state: breakerSnap.state,
+          canUse: sessionBreaker.canUse(sessionName),
+          consecutiveFailures: breakerSnap.consecutiveFailures,
+          trips: breakerSnap.trips,
+          lastError: breakerSnap.lastError,
+          lastFailureAt: breakerSnap.lastFailureAt,
+          lastSuccessAt: breakerSnap.lastSuccessAt,
+          reopensAt: breakerSnap.reopensAt
+        },
+        stats: {
+          sent,
+          failed,
+          pending,
+          rpm5Min: sessionRpm,
+          totalHandled: sent + failed
+        }
+      };
+    });
+
+    // Buscar as 10 falhas mais recentes da campanha para sensoriamento
+    const recentErrorsRaw = await prisma.campaignMessage.findMany({
+      where: {
+        campaignId: id,
+        errorMessage: { not: null }
+      },
+      orderBy: { atualizadoEm: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        contactPhone: true,
+        sessionName: true,
+        errorMessage: true,
+        status: true,
+        atualizadoEm: true
+      }
+    });
+
+    const recentErrors = recentErrorsRaw.map(err => ({
+      ...err,
+      errorClass: classifyDispatchError(err.errorMessage)
+    }));
+
+    // Estimativa de tempo restante (ETA)
+    let etaMinutes: number | null = null;
+    const remainingCount = counts.PENDING + counts.PROCESSING;
+    if (rpm5Min > 0) {
+      etaMinutes = Math.ceil(remainingCount / rpm5Min);
+    } else if (rpm15Min > 0) {
+      etaMinutes = Math.ceil(remainingCount / rpm15Min);
+    }
+
+    const totalProcessed = counts.SENT + counts.FAILED;
+    const successRate = totalProcessed > 0
+      ? Number(((counts.SENT / totalProcessed) * 100).toFixed(1))
+      : 100;
+
+    res.json({
+      campaignId: campaign.id,
+      campaignName: campaign.nome,
+      status: campaign.status,
+      timestamp: now.toISOString(),
+      performance: {
+        rpm5Min,
+        rpm15Min,
+        etaMinutes,
+        successRatePercent: successRate,
+        configuredRandomDelay: campaign.randomDelay
+      },
+      counts: {
+        total: campaign.totalContacts,
+        pending: counts.PENDING,
+        processing: counts.PROCESSING,
+        sent: counts.SENT,
+        failed: counts.FAILED
+      },
+      cylinders,
+      quarantinedSessionsCount: cylinders.filter(c => c.circuit.state === 'OPEN').length,
+      activeSessionsCount: cylinders.filter(c => c.circuit.state === 'CLOSED' || c.circuit.state === 'HALF_OPEN').length,
+      recentErrors
+    });
+  } catch (error) {
+    console.error('Erro ao gerar telemetria do dinamometro:', error);
+    res.status(500).json({ error: 'Erro interno ao obter telemetria da campanha' });
   }
 };
