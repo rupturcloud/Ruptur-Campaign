@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { Header } from '../components/Header';
 import { Portal } from '../components/Portal';
+import { CampaignDynoModal } from '../components/CampaignDynoModal';
 import { UazapiConfig } from '../components/flow-nodes/UazapiConfig';
 import { UazapiPhonePreview } from '../components/flow-nodes/UazapiPhonePreview';
 
@@ -251,6 +252,13 @@ export function CampaignsPage() {
   const [reportData, setReportData] = useState<any>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [currentReportCampaignId, setCurrentReportCampaignId] = useState<string | null>(null);
+  const [dynoCampaignId, setDynoCampaignId] = useState<string | null>(null);
+  const [showDynoModal, setShowDynoModal] = useState(false);
+
+  const handleOpenDyno = (campaignId: string) => {
+    setDynoCampaignId(campaignId);
+    setShowDynoModal(true);
+  };
   const [reportCurrentPage, setReportCurrentPage] = useState(1);
   const [reportItemsPerPage] = useState(8);
   const [campaignsCurrentPage, setCampaignsCurrentPage] = useState(1);
@@ -1258,6 +1266,16 @@ export function CampaignsPage() {
 
                     {/* Botões de ação */}
                     <div className="flex gap-1 self-end sm:self-auto sm:ml-4">
+                      <button
+                        onClick={() => handleOpenDyno(campaign.id)}
+                        className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded flex items-center gap-1 shadow-sm font-medium transition"
+                        title="Dinamômetro da campanha (telemetria, RPM e cilindros ao vivo)"
+                      >
+                        <svg className="w-3 h-3 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span className="hidden md:inline">Dinamômetro</span>
+                      </button>
                       <button
                         onClick={() => handleViewReport(campaign.id)}
                         className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
@@ -3226,6 +3244,13 @@ export function CampaignsPage() {
           </div>
           </Portal>
         )}
+
+        {/* Modal de Dinamômetro da Campanha */}
+        <CampaignDynoModal
+          campaignId={dynoCampaignId}
+          isOpen={showDynoModal}
+          onClose={() => setShowDynoModal(false)}
+        />
 
         {/* Modal de Relatórios */}
         {showReportModal && (
