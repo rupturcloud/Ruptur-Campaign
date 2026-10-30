@@ -83,6 +83,25 @@ class CampaignSchedulerService {
         await this.dispatchInteractiveCampaign(interactiveCampaign);
       }
 
+      // Recuperar mensagens presas em PROCESSING há mais de 5 minutos (evitar zumbis em caso de reinicialização/queda de container)
+      try {
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        const stuckMessages = await prisma.campaignMessage.updateMany({
+          where: {
+            status: "PROCESSING",
+            atualizadoEm: { lt: fiveMinutesAgo }
+          },
+          data: {
+            status: "PENDING"
+          }
+        });
+        if (stuckMessages.count > 0) {
+          console.log(`♻️ [Zombie Recovery] Recuperadas ${stuckMessages.count} mensagens presas em PROCESSING -> PENDING`);
+        }
+      } catch (recoveryErr) {
+        console.error("Erro ao recuperar mensagens zumbi:", recoveryErr);
+      }
+
       // Processar campanhas em execução
       const runningCampaigns = await prisma.campaign.findMany({
         where: { status: 'RUNNING' },
