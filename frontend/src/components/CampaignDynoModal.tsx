@@ -82,8 +82,8 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
     if (!silent) setLoading(true);
 
     try {
-      const token = localStorage.getItem('token');
-      const tenantId = localStorage.getItem('selectedTenantId');
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const tenantId = localStorage.getItem('selected_tenant_id') || localStorage.getItem('selectedTenantId');
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
@@ -148,7 +148,7 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-bold text-slate-100 tracking-tight">
-                    Dinamômetro da Campanha
+                    Cockpit de Telemetria
                   </h3>
                   {data && (
                     <span className={`px-2 py-0.5 text-xs font-semibold rounded-full uppercase tracking-wider ${
@@ -452,7 +452,7 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
               Última sincronização: {lastFetchedAt ? lastFetchedAt.toLocaleTimeString('pt-BR') : 'Nunca'}
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400">Torre Central • Proteção Ativa</span>
+              <span className="text-[11px] text-slate-400">Torre Central • Dinamômetro & Telemetria Legítima</span>
               <button
                 onClick={onClose}
                 className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md transition"
