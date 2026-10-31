@@ -82,14 +82,11 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
     if (!silent) setLoading(true);
 
     try {
-      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
-      const tenantId = localStorage.getItem('selected_tenant_id') || localStorage.getItem('selectedTenantId');
-
+      const token = localStorage.getItem('auth_token');
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      if (tenantId) headers['X-Tenant-Id'] = tenantId;
 
       const res = await fetch(`/api/campaigns/${campaignId}/dyno`, { headers });
       if (res.ok) {
