@@ -11,7 +11,8 @@ import {
   getContactTags,
   getActiveSessions,
   campaignValidation,
-  getCampaignLiveTelemetry
+  getCampaignLiveTelemetry,
+  tuneCampaign
 } from '../controllers/campaignController';
 import { authMiddleware } from '../middleware/auth';
 import { checkCampaignQuota } from '../middleware/quotaMiddleware';
@@ -31,5 +32,6 @@ router.post('/', authMiddleware, campaignValidation, checkCampaignQuota, createC
 router.put('/:id', authMiddleware, updateCampaign);
 router.delete('/:id', authMiddleware, deleteCampaign);
 router.patch('/:id/toggle', authMiddleware, toggleCampaign);
+router.patch('/:id/tuning', authMiddleware, tuneCampaign);
 
 export default router;

@@ -188,6 +188,19 @@ export class SessionCircuitBreaker {
     }
     return list;
   }
+
+  forceOpen(session: string, reason = 'Quarentena manual pelo operador', cooldownMs?: number, now = Date.now()): void {
+    const e = this.entry(session);
+    e.state = 'OPEN';
+    e.openedAt = now;
+    e.cooldownMs = cooldownMs || this.baseCooldownMs;
+    e.lastError = reason;
+    e.trips += 1;
+  }
+
+  forceReset(session: string, now = Date.now()): void {
+    this.recordSuccess(session, now);
+  }
 }
 
 /** Orçamento de re-tentativas por mensagem (em memória). */

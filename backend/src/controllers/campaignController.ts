@@ -1032,7 +1032,7 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
     const rpm5Min = Number((sentLast5Min / 5).toFixed(2));
     const rpm15Min = Number((sentLast15Min / 15).toFixed(2));
 
-    // Sessoes configuradas na campanha
+    // Sessões configuradas na campanha
     let configuredSessionNames: string[] = [];
     try {
       if (campaign.sessionNames) {
@@ -1044,7 +1044,7 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       configuredSessionNames = campaign.sessionName ? [campaign.sessionName] : [];
     }
 
-    // Mensagens agrupadas por sessao e status
+    // Mensagens agrupadas por sessão e status
     const sessionStatsAgg = await prisma.campaignMessage.groupBy({
       by: ['sessionName', 'status'],
       where: {
@@ -1054,7 +1054,7 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       _count: { _all: true }
     });
 
-    // Envios recentes por sessao (ultimos 5 min)
+    // Envios recentes por sessão (últimos 5 min)
     const sessionRecentSent = await prisma.campaignMessage.groupBy({
       by: ['sessionName'],
       where: {
@@ -1075,7 +1075,7 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       if (row.sessionName) allDispatchedSessions.add(row.sessionName);
     }
 
-    // Metadados de sessoes no banco
+    // Metadados de sessões no banco
     const sessionRecords = await prisma.whatsAppSession.findMany({
       where: { name: { in: Array.from(allDispatchedSessions) } },
       select: {
@@ -1088,7 +1088,34 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
     });
     const sessionRecordMap = new Map(sessionRecords.map(s => [s.name, s]));
 
-    // Cilindros do motor (uma entrada por instancia)
+    // Amostras de latência de entrega (últimas 50 mensagens enviadas)
+    const latencySamples = await prisma.campaignMessage.findMany({
+      where: {
+        campaignId: id,
+        status: 'SENT',
+        sentAt: { not: null }
+      },
+      orderBy: { atualizadoEm: 'desc' },
+      take: 50,
+      select: {
+        sessionName: true,
+        criadoEm: true,
+        sentAt: true
+      }
+    });
+
+    // Calcular latência média global e por instância
+    const instanceLatencies = new Map<string, number[]>();
+    for (const sample of latencySamples) {
+      if (sample.sessionName && sample.sentAt) {
+        const diffMs = Math.max(100, Math.min(60000, sample.sentAt.getTime() - sample.criadoEm.getTime()));
+        const list = instanceLatencies.get(sample.sessionName) || [];
+        list.push(diffMs);
+        instanceLatencies.set(sample.sessionName, list);
+      }
+    }
+
+    // Cilindros do motor (uma entrada por instância)
     const cylinders = Array.from(allDispatchedSessions).map(sessionName => {
       const record = sessionRecordMap.get(sessionName);
       const breakerSnap = sessionBreaker.snapshot(sessionName);
@@ -1104,8 +1131,26 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
         }
       }
 
+      const totalHandled = sent + failed;
       const sessionSent5 = recentSentMap.get(sessionName) || 0;
       const sessionRpm = Number((sessionSent5 / 5).toFixed(2));
+      const successRate = totalHandled > 0 ? Number(((sent / totalHandled) * 100).toFixed(1)) : 100;
+
+      // Calcular HealthScore dinâmico (0 - 100)
+      let healthScore = 100;
+      if (record?.status === 'DISCONNECTED' || record?.status === 'FAILED') healthScore -= 40;
+      if (breakerSnap.state === 'OPEN') healthScore -= 50;
+      if (breakerSnap.state === 'HALF_OPEN') healthScore -= 20;
+      healthScore -= Math.min(30, breakerSnap.consecutiveFailures * 15);
+      if (totalHandled > 10 && successRate < 80) healthScore -= 20;
+      healthScore = Math.max(0, Math.min(100, healthScore));
+
+      // Latência média estimada da instância
+      const lats = instanceLatencies.get(sessionName) || [];
+      const avgLatencyMs = lats.length > 0 ? Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) : null;
+
+      // Sonda Lambda operacional (ratio de equilíbrio de tráfego)
+      const lambdaRatio = Number((Math.min(1.5, Math.max(0.5, 1.0 + (sessionRpm - 2) * 0.05))).toFixed(2));
 
       return {
         sessionName,
@@ -1127,10 +1172,101 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
           failed,
           pending,
           rpm5Min: sessionRpm,
-          totalHandled: sent + failed
+          totalHandled,
+          successRatePercent: successRate,
+          healthScore,
+          avgLatencyMs,
+          lambdaRatio
         }
       };
     });
+
+    // =========================================================================
+    // DATALOGGER TEMPORAL (Curva Contínua do Dinamômetro - EcuTuner / Dyno Graph)
+    // =========================================================================
+    const dataloggerWindowMs = 45 * 60_000; // 45 minutos de telemetria contínua
+    const windowStart = new Date(now.getTime() - dataloggerWindowMs);
+
+    // Mensagens no período da janela para agregação temporal por bucket
+    const timelineMessages = await prisma.campaignMessage.findMany({
+      where: {
+        campaignId: id,
+        OR: [
+          { sentAt: { gte: windowStart } },
+          { status: 'FAILED', atualizadoEm: { gte: windowStart } }
+        ]
+      },
+      select: {
+        status: true,
+        sentAt: true,
+        atualizadoEm: true,
+        sessionName: true,
+        errorMessage: true
+      },
+      orderBy: { atualizadoEm: 'asc' }
+    });
+
+    // Agrupar em buckets cronológicos de 1 minuto
+    const bucketCount = 30; // 30 pontos no gráfico
+    const bucketDurationMs = dataloggerWindowMs / bucketCount;
+    const datalogger: Array<{
+      timestamp: string;
+      minuteLabel: string;
+      rpm: number;
+      sent: number;
+      failed: number;
+      infraErrors: number;
+      successRate: number;
+      activeCylinders: number;
+      perCylinderRpm: Record<string, number>;
+    }> = [];
+
+    for (let b = 0; b < bucketCount; b++) {
+      const bStart = new Date(windowStart.getTime() + b * bucketDurationMs);
+      const bEnd = new Date(bStart.getTime() + bucketDurationMs);
+      const minuteLabel = bStart.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+      let sentInBucket = 0;
+      let failedInBucket = 0;
+      let infraInBucket = 0;
+      const cylindersInBucket = new Set<string>();
+      const perCylRpm: Record<string, number> = {};
+
+      for (const msg of timelineMessages) {
+        const msgTime = msg.sentAt || msg.atualizadoEm;
+        if (msgTime >= bStart && msgTime < bEnd) {
+          if (msg.status === 'SENT') {
+            sentInBucket++;
+            if (msg.sessionName) {
+              cylindersInBucket.add(msg.sessionName);
+              perCylRpm[msg.sessionName] = (perCylRpm[msg.sessionName] || 0) + 1;
+            }
+          } else if (msg.status === 'FAILED') {
+            failedInBucket++;
+            if (classifyDispatchError(msg.errorMessage) === 'INFRA') {
+              infraInBucket++;
+            }
+          }
+        }
+      }
+
+      const bucketTotal = sentInBucket + failedInBucket;
+      const rate = bucketTotal > 0 ? Number(((sentInBucket / bucketTotal) * 100).toFixed(1)) : 100;
+      const bucketMinutes = bucketDurationMs / 60_000;
+      const calculatedRpm = Number((sentInBucket / bucketMinutes).toFixed(1));
+
+      datalogger.push({
+        timestamp: bStart.toISOString(),
+        minuteLabel,
+        rpm: calculatedRpm,
+        sent: sentInBucket,
+        failed: failedInBucket,
+        infraErrors: infraInBucket,
+        successRate: rate,
+        activeCylinders: cylindersInBucket.size,
+        perCylinderRpm: perCylRpm
+      });
+    }
 
     // Buscar as 10 falhas mais recentes da campanha para sensoriamento
     const recentErrorsRaw = await prisma.campaignMessage.findMany({
@@ -1191,10 +1327,84 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       cylinders,
       quarantinedSessionsCount: cylinders.filter(c => c.circuit.state === 'OPEN').length,
       activeSessionsCount: cylinders.filter(c => c.circuit.state === 'CLOSED' || c.circuit.state === 'HALF_OPEN').length,
-      recentErrors
+      recentErrors,
+      datalogger
     });
   } catch (error) {
     console.error('Erro ao gerar telemetria do dinamometro:', error);
     res.status(500).json({ error: 'Erro interno ao obter telemetria da campanha' });
+  }
+};
+
+// =============================================================================
+// REMAP & CALIBRAÇÃO EM TEMPO REAL (Tuning Console - ECU Remap da Campanha)
+// =============================================================================
+export const tuneCampaign = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { randomDelay, sessionNames, circuitAction } = req.body;
+
+    const where: any = { id };
+    if (req.user?.role !== 'SUPERADMIN' && req.tenantId) {
+      where.OR = [
+        { tenantId: req.tenantId },
+        { tenantId: null }
+      ];
+    }
+
+    const campaign = await prisma.campaign.findFirst({ where });
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campanha não encontrada' });
+    }
+
+    const updateData: any = {};
+
+    // 1. Ajuste de Timing (Delay entre mensagens)
+    if (typeof randomDelay === 'number' && randomDelay >= 5 && randomDelay <= 300) {
+      updateData.randomDelay = Math.round(randomDelay);
+    }
+
+    // 2. Rebalanceamento do Pool de Instâncias da Campanha
+    if (Array.isArray(sessionNames) && sessionNames.length > 0) {
+      updateData.sessionNames = JSON.stringify(sessionNames);
+      if (!sessionNames.includes(campaign.sessionName)) {
+        updateData.sessionName = sessionNames[0];
+      }
+    }
+
+    // 3. Controle Manual do Disjuntor (Quarentena Forçada ou Reset)
+    let circuitFeedback = null;
+    if (circuitAction && typeof circuitAction.sessionName === 'string') {
+      const targetSession = circuitAction.sessionName;
+      if (circuitAction.action === 'quarantine') {
+        const cooldownMs = (Number(circuitAction.cooldownMinutes) || 15) * 60_000;
+        sessionBreaker.forceOpen(targetSession, circuitAction.reason || 'Quarentena manual pelo operador no Cockpit', cooldownMs);
+        circuitFeedback = { session: targetSession, action: 'quarantined', snapshot: sessionBreaker.snapshot(targetSession) };
+      } else if (circuitAction.action === 'reset') {
+        sessionBreaker.forceReset(targetSession);
+        circuitFeedback = { session: targetSession, action: 'reset', snapshot: sessionBreaker.snapshot(targetSession) };
+      }
+    }
+
+    let updatedCampaign = campaign;
+    if (Object.keys(updateData).length > 0) {
+      updatedCampaign = await prisma.campaign.update({
+        where: { id },
+        data: updateData
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Parâmetros de calibração aplicados com sucesso ao motor de disparos',
+      tunedParameters: {
+        randomDelay: updatedCampaign.randomDelay,
+        sessionNames: updatedCampaign.sessionNames ? JSON.parse(updatedCampaign.sessionNames) : [],
+        circuitFeedback
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao calibrar campanha:', error);
+    res.status(500).json({ error: 'Erro interno ao calibrar campanha' });
   }
 };
