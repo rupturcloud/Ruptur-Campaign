@@ -95,7 +95,7 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
         setLastFetchedAt(new Date());
       }
     } catch (err) {
-      console.error('Falha ao obter telemetria do dinamômetro:', err);
+      console.error('Falha ao obter dados de telemetria:', err);
     } finally {
       if (!silent) setLoading(false);
     }
@@ -205,7 +205,7 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
             {loading && !data ? (
               <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
                 <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm">Conectando ao dinamômetro...</span>
+                <span className="text-sm">Conectando ao Cockpit de Telemetria...</span>
               </div>
             ) : data ? (
               <>
@@ -449,7 +449,7 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
               Última sincronização: {lastFetchedAt ? lastFetchedAt.toLocaleTimeString('pt-BR') : 'Nunca'}
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400">Torre Central • Dinamômetro & Telemetria Legítima</span>
+              <span className="text-[11px] text-slate-400">Cockpit de Telemetria • Torre de Controle & Proteção Ativa</span>
               <button
                 onClick={onClose}
                 className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md transition"

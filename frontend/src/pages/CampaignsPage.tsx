@@ -1269,12 +1269,12 @@ export function CampaignsPage() {
                       <button
                         onClick={() => handleOpenDyno(campaign.id)}
                         className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded flex items-center gap-1 shadow-sm font-medium transition"
-                        title="Cockpit de Telemetria (RPM, Dinamômetro e Cilindros em tempo real)"
+                        title="Cockpit de Telemetria (Vazão, RPM e Saúde dos Canais ao vivo)"
                       >
                         <svg className="w-3 h-3 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
                         </svg>
-                        <span className="hidden md:inline">Telemetria</span>
+                        <span className="hidden md:inline">Cockpit</span>
                       </button>
                       <button
                         onClick={() => handleViewReport(campaign.id)}
