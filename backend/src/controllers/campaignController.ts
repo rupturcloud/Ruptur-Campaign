@@ -1184,16 +1184,49 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
     // =========================================================================
     // DATALOGGER TEMPORAL (Curva Contínua do Dinamômetro - EcuTuner / Dyno Graph)
     // =========================================================================
-    const dataloggerWindowMs = 45 * 60_000; // 45 minutos de telemetria contínua
-    const windowStart = new Date(now.getTime() - dataloggerWindowMs);
+    // Determinar a janela temporal real da campanha:
+    // Se a campanha está ativa, monitora o período recente até agora.
+    // Se já foi concluída ou pausada no passado, cobre o período entre o primeiro e o último disparo.
+    let windowStart: Date;
+    let windowEnd: Date = now;
+
+    if (campaign.status === 'RUNNING') {
+      const activeStart = campaign.startedAt ? new Date(campaign.startedAt) : new Date(now.getTime() - 45 * 60_000);
+      // Se começou há menos de 10 minutos, garante uma janela mínima de 30 minutos
+      windowStart = new Date(Math.min(activeStart.getTime(), now.getTime() - 30 * 60_000));
+    } else {
+      // Buscar primeira e última mensagem disparada da campanha
+      const [firstSent, lastSent] = await Promise.all([
+        prisma.campaignMessage.findFirst({
+          where: { campaignId: id, sentAt: { not: null } },
+          orderBy: { sentAt: 'asc' },
+          select: { sentAt: true }
+        }),
+        prisma.campaignMessage.findFirst({
+          where: { campaignId: id, sentAt: { not: null } },
+          orderBy: { sentAt: 'desc' },
+          select: { sentAt: true }
+        })
+      ]);
+
+      if (firstSent?.sentAt && lastSent?.sentAt) {
+        windowStart = new Date(firstSent.sentAt.getTime() - 60_000);
+        windowEnd = new Date(lastSent.sentAt.getTime() + 60_000);
+      } else {
+        windowStart = new Date(now.getTime() - 45 * 60_000);
+        windowEnd = now;
+      }
+    }
+
+    const dataloggerWindowMs = Math.max(5 * 60_000, windowEnd.getTime() - windowStart.getTime());
 
     // Mensagens no período da janela para agregação temporal por bucket
     const timelineMessages = await prisma.campaignMessage.findMany({
       where: {
         campaignId: id,
         OR: [
-          { sentAt: { gte: windowStart } },
-          { status: 'FAILED', atualizadoEm: { gte: windowStart } }
+          { sentAt: { gte: windowStart, lte: windowEnd } },
+          { status: 'FAILED', atualizadoEm: { gte: windowStart, lte: windowEnd } }
         ]
       },
       select: {
@@ -1206,8 +1239,8 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       orderBy: { atualizadoEm: 'asc' }
     });
 
-    // Agrupar em buckets cronológicos de 1 minuto
-    const bucketCount = 30; // 30 pontos no gráfico
+    // Agrupar em buckets cronológicos (entre 20 e 40 pontos no gráfico)
+    const bucketCount = 30;
     const bucketDurationMs = dataloggerWindowMs / bucketCount;
     const datalogger: Array<{
       timestamp: string;
@@ -1219,6 +1252,7 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       successRate: number;
       activeCylinders: number;
       perCylinderRpm: Record<string, number>;
+      perCylinderStats: Record<string, { sent: number; failed: number }>;
     }> = [];
 
     for (let b = 0; b < bucketCount; b++) {
@@ -1231,18 +1265,22 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       let infraInBucket = 0;
       const cylindersInBucket = new Set<string>();
       const perCylRpm: Record<string, number> = {};
+      const perCylStats: Record<string, { sent: number; failed: number }> = {};
 
       for (const msg of timelineMessages) {
         const msgTime = msg.sentAt || msg.atualizadoEm;
         if (msgTime >= bStart && msgTime < bEnd) {
+          const sName = msg.sessionName || 'desconhecido';
+          if (!perCylStats[sName]) perCylStats[sName] = { sent: 0, failed: 0 };
+
           if (msg.status === 'SENT') {
             sentInBucket++;
-            if (msg.sessionName) {
-              cylindersInBucket.add(msg.sessionName);
-              perCylRpm[msg.sessionName] = (perCylRpm[msg.sessionName] || 0) + 1;
-            }
+            cylindersInBucket.add(sName);
+            perCylRpm[sName] = (perCylRpm[sName] || 0) + 1;
+            perCylStats[sName].sent++;
           } else if (msg.status === 'FAILED') {
             failedInBucket++;
+            perCylStats[sName].failed++;
             if (classifyDispatchError(msg.errorMessage) === 'INFRA') {
               infraInBucket++;
             }
@@ -1252,7 +1290,7 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
 
       const bucketTotal = sentInBucket + failedInBucket;
       const rate = bucketTotal > 0 ? Number(((sentInBucket / bucketTotal) * 100).toFixed(1)) : 100;
-      const bucketMinutes = bucketDurationMs / 60_000;
+      const bucketMinutes = Math.max(0.5, bucketDurationMs / 60_000);
       const calculatedRpm = Number((sentInBucket / bucketMinutes).toFixed(1));
 
       datalogger.push({
@@ -1264,7 +1302,8 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
         infraErrors: infraInBucket,
         successRate: rate,
         activeCylinders: cylindersInBucket.size,
-        perCylinderRpm: perCylRpm
+        perCylinderRpm: perCylRpm,
+        perCylinderStats: perCylStats
       });
     }
 
