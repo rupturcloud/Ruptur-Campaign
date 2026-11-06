@@ -59,12 +59,18 @@ interface DynoData {
   performance: {
     rpm5Min: number;
     rpm15Min: number;
+    effectiveRpm?: number;
+    nominalRpm?: number;
     etaMinutes: number | null;
+    etaFormatted?: string;
+    etaBasis?: string;
     successRatePercent: number;
     configuredRandomDelay: number;
   };
   counts: {
     total: number;
+    processed?: number;
+    remaining?: number;
     pending: number;
     processing: number;
     sent: number;
@@ -411,63 +417,124 @@ export const CampaignDynoModal: React.FC<CampaignDynoModalProps> = ({
           )}
 
           {/* Métricas Rápidas no Padrão do Sistema Ruptur */}
-          <div className="bg-white border-b border-gray-200 px-6 py-3.5">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-              <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-3">
-                <span className="text-[11px] font-semibold text-blue-800 uppercase tracking-wider">Vazão Atual</span>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-2xl font-bold text-blue-700">{p?.rpm5Min ?? 0}</span>
-                  <span className="text-[11px] text-blue-600">msg/min</span>
-                </div>
-              </div>
+          {(() => {
+            const totalCount = c?.total ?? 0;
+            const sentCount = c?.sent ?? 0;
+            const failedCount = c?.failed ?? 0;
+            const processedCount = c?.processed ?? (sentCount + failedCount);
+            const remainingCount = c?.remaining ?? Math.max(0, totalCount - processedCount);
+            const percentProcessed = totalCount > 0 ? Math.min(100, Math.round((processedCount / totalCount) * 100)) : 0;
+            const percentSent = totalCount > 0 ? Math.min(100, Math.round((sentCount / totalCount) * 100)) : 0;
+            const percentFailed = totalCount > 0 ? Math.min(100 - percentSent, Math.round((failedCount / totalCount) * 100)) : 0;
 
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <span className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Vazão Média (15m)</span>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-2xl font-bold text-gray-800">{p?.rpm15Min ?? 0}</span>
-                  <span className="text-[11px] text-gray-500">msg/min</span>
-                </div>
-              </div>
+            return (
+              <div className="bg-white border-b border-gray-200 px-6 py-3.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                  {/* 1. Total a Fazer */}
+                  <div className="bg-blue-50/50 border border-blue-200/70 rounded-lg p-3 flex flex-col justify-between">
+                    <span className="text-[11px] font-semibold text-blue-900 uppercase tracking-wider">Total Planejado</span>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold text-blue-700">{totalCount}</span>
+                      <span className="text-[11px] text-blue-600">leads</span>
+                    </div>
+                    <span className="text-[10px] text-blue-500 font-medium mt-1">Fila da campanha</span>
+                  </div>
 
-              <div className="bg-green-50/60 border border-green-100 rounded-lg p-3">
-                <span className="text-[11px] font-semibold text-green-800 uppercase tracking-wider">Taxa de Sucesso</span>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-2xl font-bold text-green-700">{p?.successRatePercent ?? 100}%</span>
-                </div>
-              </div>
-
-              <div className="bg-purple-50/60 border border-purple-100 rounded-lg p-3">
-                <span className="text-[11px] font-semibold text-purple-800 uppercase tracking-wider">Previsão (ETA)</span>
-                <div className="mt-1 text-base font-bold text-purple-700">
-                  {p?.etaMinutes !== null ? `~${p?.etaMinutes} min` : 'Em espera'}
-                </div>
-              </div>
-
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <span className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Instâncias Ativas</span>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <span className="text-xl font-bold text-gray-800">{data?.activeSessionsCount ?? 0}</span>
-                  <span className="text-xs text-gray-500">/ {data?.cylinders?.length ?? 0}</span>
-                  {(data?.quarantinedSessionsCount || 0) > 0 && (
-                    <span className="text-[10px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded">
-                      {data?.quarantinedSessionsCount} em proteção
+                  {/* 2. Disparos J? Feitos */}
+                  <div className="bg-emerald-50/50 border border-emerald-200/70 rounded-lg p-3 flex flex-col justify-between">
+                    <span className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wider">Disparos Feitos</span>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold text-emerald-700">{sentCount}</span>
+                      <span className="text-[11px] text-emerald-600">enviadas</span>
+                    </div>
+                    <span className={`text-[10px] font-medium mt-1 ${failedCount > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}`}>
+                      {failedCount > 0 ? `? ${failedCount} com falha` : '? 0 falhas'}
                     </span>
-                  )}
+                  </div>
+
+                  {/* 3. Restam Fazer */}
+                  <div className="bg-amber-50/50 border border-amber-200/70 rounded-lg p-3 flex flex-col justify-between">
+                    <span className="text-[11px] font-semibold text-amber-900 uppercase tracking-wider">Restam Fazer</span>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold text-amber-700">{remainingCount}</span>
+                      <span className="text-[11px] text-amber-600">contatos</span>
+                    </div>
+                    <span className="text-[10px] text-amber-600 font-medium mt-1">
+                      {remainingCount === 0 ? 'Fila zerada' : `${c?.pending ?? remainingCount} na fila`}
+                    </span>
+                  </div>
+
+                  {/* 4. Previs?o de Entrega (ETA) */}
+                  <div className="bg-purple-50/50 border border-purple-200/70 rounded-lg p-3 flex flex-col justify-between">
+                    <span className="text-[11px] font-semibold text-purple-900 uppercase tracking-wider">Previs?o (ETA)</span>
+                    <div className="mt-1 text-base font-bold text-purple-700 truncate" title={p?.etaFormatted || ''}>
+                      {p?.etaFormatted || (p?.etaMinutes !== null ? `~${p?.etaMinutes} min` : 'Em espera')}
+                    </div>
+                    <span className="text-[10px] text-purple-600 font-medium mt-1 truncate" title={p?.etaBasis || ''}>
+                      {p?.etaBasis || (p?.rpm5Min ? `${p.rpm5Min} msg/min atual` : 'Aguardando pulso')}
+                    </span>
+                  </div>
+
+                  {/* 5. Vaz?o Atual Operacional */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex flex-col justify-between">
+                    <span className="text-[11px] font-semibold text-gray-700 uppercase tracking-wider">Vaz?o (RPM)</span>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <span className="text-2xl font-bold text-gray-800">{p?.rpm5Min ?? 0}</span>
+                      <span className="text-[11px] text-gray-500">msg/min</span>
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-medium mt-1">
+                      M?dia 15m: {p?.rpm15Min ?? 0} msg/min
+                    </span>
+                  </div>
+
+                  {/* 6. Inst?ncias Ativas */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex flex-col justify-between">
+                    <span className="text-[11px] font-semibold text-gray-700 uppercase tracking-wider">Inst?ncias Ativas</span>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <span className="text-2xl font-bold text-gray-800">{data?.activeSessionsCount ?? 0}</span>
+                      <span className="text-xs text-gray-500">/ {data?.cylinders?.length ?? 0}</span>
+                      {(data?.quarantinedSessionsCount || 0) > 0 && (
+                        <span className="text-[10px] font-bold text-red-600 bg-red-100 px-1 py-0.5 rounded">
+                          {data?.quarantinedSessionsCount} protegidas
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-emerald-600 font-medium mt-1">
+                      {p?.successRatePercent ?? 100}% de sucesso
+                    </span>
+                  </div>
+                </div>
+
+                {/* Barra de Progresso Visual de Disparos em Tempo Real */}
+                <div className="mt-3 pt-3 border-t border-gray-100 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-gray-800 flex items-center gap-2">
+                      <span>Progresso da Campanha:</span>
+                      <span className="text-blue-600 font-bold">{percentProcessed}% conclu?do</span>
+                    </span>
+                    <span className="text-gray-600 font-mono text-[11px]">
+                      <strong className="text-gray-900">{processedCount}</strong> de <strong className="text-gray-900">{totalCount}</strong> processados ? <strong className="text-amber-700">{remainingCount}</strong> restantes
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200 flex">
+                    <div
+                      style={{ width: `${percentSent}%` }}
+                      className="bg-emerald-500 transition-all duration-500"
+                      title={`${sentCount} enviadas com sucesso`}
+                    />
+                    {percentFailed > 0 && (
+                      <div
+                        style={{ width: `${percentFailed}%` }}
+                        className="bg-red-500 transition-all duration-500"
+                        title={`${failedCount} falhas`}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
+            );
+          })()}
 
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <span className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider">Entregas</span>
-                <div className="mt-1 flex items-baseline justify-between text-xs font-mono">
-                  <span className="text-green-600 font-bold text-base">{c?.sent ?? 0}</span>
-                  <span className="text-gray-400">/</span>
-                  <span className="text-gray-600 font-medium">{c?.total ?? 0}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Abas no Estilo Ruptur UI */}
           <div className="flex items-center gap-4 px-6 border-b border-gray-200 bg-white">
             <button
               onClick={() => setActiveTab('DATALOGGER')}

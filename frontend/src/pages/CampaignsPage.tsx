@@ -31,6 +31,7 @@ interface Campaign {
   completedAt: string | null;
   createdBy: string | null;
   createdByName: string | null;
+  manualPhones?: string;
   criadoEm: string;
   session: {
     name: string;
@@ -615,16 +616,14 @@ export function CampaignsPage() {
       sendMode = 'draft';
     } else if (campaign.scheduledFor && !campaign.startImmediately) {
       sendMode = 'scheduled';
-    } else if (campaign.startImmediately) {
-      sendMode = 'immediate';
     } else {
-      sendMode = campaign.status === 'PENDING' ? 'scheduled' : 'draft';
+      sendMode = 'immediate';
     }
 
     setFormData({
       nome: campaign.nome,
       targetTags: campaign.targetTags || [],
-      manualPhones: '',
+      manualPhones: campaign.manualPhones || '',
       sessionNames: campaign.sessionNames || [],
       sessionName: campaign.sessionName || '',
       messageType: 'sequence',
@@ -655,7 +654,7 @@ export function CampaignsPage() {
           body: JSON.stringify({
             nome: duplicatedName,
             targetTags: campaign.targetTags || [],
-            manualPhones: '',
+            manualPhones: campaign.manualPhones || '',
             sessionNames: campaign.sessionNames || [],
             sessionName: campaign.sessionName || '',
             messageType: sequence.length > 1 ? 'sequence' : (sequence[0]?.type || campaign.messageType || 'text'),

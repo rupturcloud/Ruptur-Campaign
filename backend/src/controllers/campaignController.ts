@@ -149,6 +149,7 @@ export const listCampaigns = async (req: AuthenticatedRequest, res: Response) =>
     // Parse JSON fields
     const campaignsWithParsedData = campaigns.map(campaign => ({
       ...campaign,
+      manualPhones: (campaign as any).manualPhones || '',
       targetTags: JSON.parse(campaign.targetTags),
       sessionNames: campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [],
       messageContent: JSON.parse(campaign.messageContent)
@@ -201,9 +202,18 @@ export const getCampaign = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(404).json({ error: 'Campanha não encontrada' });
     }
 
+    let resolvedManualPhones = (campaign as any).manualPhones || '';
+    if (!resolvedManualPhones && (campaign as any).messages) {
+      const manualMessages = (campaign as any).messages.filter((m: any) => m.contactId === null);
+      if (manualMessages.length > 0) {
+        resolvedManualPhones = manualMessages.map((m: any) => m.contactPhone).join('\n');
+      }
+    }
+
     // Parse JSON fields
     const campaignWithParsedData = {
       ...campaign,
+      manualPhones: resolvedManualPhones,
       targetTags: JSON.parse(campaign.targetTags),
       sessionNames: campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [],
       messageContent: JSON.parse(campaign.messageContent)
@@ -346,6 +356,7 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
         targetTags: JSON.stringify(targetTags || []),
         sessionNames: JSON.stringify(sessionNames || []),
         sessionName: resolvedSessionName, // Para compatibilidade
+        manualPhones: typeof manualPhones === 'string' && manualPhones.trim() ? manualPhones.trim() : null,
         messageType: messageType || 'text',
         messageContent: JSON.stringify(messageContent ?? { text: '' }),
         randomDelay: randomDelay || 30,
@@ -427,6 +438,9 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
     if (messageType !== undefined) updateData.messageType = messageType;
     if (messageContent !== undefined) updateData.messageContent = JSON.stringify(messageContent);
     if (randomDelay !== undefined) updateData.randomDelay = randomDelay;
+    if (manualPhones !== undefined) {
+      updateData.manualPhones = typeof manualPhones === 'string' && manualPhones.trim() ? manualPhones.trim() : null;
+    }
 
     // Determinar novo status e modo de envio se fornecidos
     const isDraft = status === 'DRAFT' || sendMode === 'draft';
@@ -492,7 +506,7 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
 
       const newContacts = orderContactsByTagPriority(filteredContacts, manualContacts, activeTags);
 
-      if (newContacts.length > 0 && (['DRAFT', 'PENDING', 'PAUSED'].includes(existing.status) || existing.sentCount === 0)) {
+      if (newContacts.length > 0) {
         await prisma.campaignMessage.deleteMany({ where: { campaignId: id } });
         const newMessages = newContacts.map((contact: any) => ({
           campaignId: id,
@@ -506,6 +520,7 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
         updateData.totalContacts = newContacts.length;
         updateData.sentCount = 0;
         updateData.failedCount = 0;
+        updateData.completedAt = null;
       }
     }
 
@@ -1501,18 +1516,58 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       errorClass: classifyDispatchError(err.errorMessage)
     }));
 
-    // Estimativa de tempo restante (ETA)
-    let etaMinutes: number | null = null;
+    // Estimativa de tempo restante (ETA) e contadores operacionais completos
+    const totalContacts = campaign.totalContacts;
+    const sentCount = counts.SENT;
+    const failedCount = counts.FAILED;
+    const processedCount = sentCount + failedCount;
     const remainingCount = counts.PENDING + counts.PROCESSING;
+
+    // Calcular RPM efetivo para projecao de ETA
+    const activeSessions = cylinders.filter(c => c.circuit.canUse && c.dbStatus === 'CONNECTED');
+    const activeCount = activeSessions.length || configuredSessionNames.length || 1;
+    const delaySec = Math.max(5, campaign.randomDelay || 30);
+    const nominalRpm = Number(((60 / delaySec) * activeCount).toFixed(2));
+
+    let effectiveRpm = 0;
+    let etaBasis = 'Aguardando inicio';
     if (rpm5Min > 0) {
-      etaMinutes = Math.ceil(remainingCount / rpm5Min);
+      effectiveRpm = rpm5Min;
+      etaBasis = `Vazao real 5m (${rpm5Min} msg/min)`;
     } else if (rpm15Min > 0) {
-      etaMinutes = Math.ceil(remainingCount / rpm15Min);
+      effectiveRpm = rpm15Min;
+      etaBasis = `Vazao real 15m (${rpm15Min} msg/min)`;
+    } else {
+      effectiveRpm = nominalRpm;
+      etaBasis = `Estimativa nominal (${nominalRpm} msg/min - ${activeCount} conexao${activeCount > 1 ? 'es' : ''})`;
     }
 
-    const totalProcessed = counts.SENT + counts.FAILED;
-    const successRate = totalProcessed > 0
-      ? Number(((counts.SENT / totalProcessed) * 100).toFixed(1))
+    let etaMinutes: number | null = null;
+    let etaFormatted = 'Concluido';
+    if (remainingCount > 0) {
+      if (campaign.status === 'PAUSED') {
+        etaFormatted = 'Campanha pausada';
+      } else if (campaign.status === 'DRAFT') {
+        etaFormatted = 'Rascunho (nao iniciada)';
+      } else if (effectiveRpm > 0) {
+        etaMinutes = Math.ceil(remainingCount / effectiveRpm);
+        if (etaMinutes < 60) {
+          etaFormatted = `~${etaMinutes} min`;
+        } else {
+          const hours = Math.floor(etaMinutes / 60);
+          const mins = etaMinutes % 60;
+          etaFormatted = `~${hours}h ${mins}min`;
+        }
+      } else {
+        etaFormatted = 'Calculando...';
+      }
+    } else if (campaign.status === 'COMPLETED' || (totalContacts > 0 && remainingCount === 0)) {
+      etaFormatted = 'Concluido';
+      etaMinutes = 0;
+    }
+
+    const successRate = processedCount > 0
+      ? Number(((sentCount / processedCount) * 100).toFixed(1))
       : 100;
 
     res.json({
@@ -1523,20 +1578,26 @@ export const getCampaignLiveTelemetry = async (req: AuthenticatedRequest, res: R
       performance: {
         rpm5Min,
         rpm15Min,
+        effectiveRpm,
+        nominalRpm,
         etaMinutes,
+        etaFormatted,
+        etaBasis,
         successRatePercent: successRate,
         configuredRandomDelay: campaign.randomDelay
       },
       counts: {
-        total: campaign.totalContacts,
+        total: totalContacts,
+        processed: processedCount,
+        remaining: remainingCount,
         pending: counts.PENDING,
         processing: counts.PROCESSING,
-        sent: counts.SENT,
-        failed: counts.FAILED
+        sent: sentCount,
+        failed: failedCount
       },
       cylinders,
       quarantinedSessionsCount: cylinders.filter(c => c.circuit.state === 'OPEN').length,
-      activeSessionsCount: cylinders.filter(c => c.circuit.state === 'CLOSED' || c.circuit.state === 'HALF_OPEN').length,
+      activeSessionsCount: activeSessions.length,
       recentErrors,
       datalogger
     });

@@ -233,6 +233,7 @@ model Campaign {
   sessionNames     String?           @map("session_names")
   createdBy        String?           @map("created_by")
   createdByName    String?           @map("created_by_name")
+  manualPhones     String?           @map("manual_phones")
   messages         CampaignMessage[]
   session          WhatsAppSession?  @relation(fields: [sessionName], references: [name])
 
