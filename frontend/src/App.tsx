@@ -192,10 +192,31 @@ function AppContent() {
   );
 }
 
+function consumeUrlSsoToken() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const ssoToken = params.get('ssoToken');
+    if (ssoToken && typeof ssoToken === 'string') {
+      localStorage.setItem('auth_token', ssoToken);
+      params.delete('ssoToken');
+      const search = params.toString();
+      const nextUrl = window.location.pathname + (search ? '?' + search : '') + window.location.hash;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  } catch {}
+}
+consumeUrlSsoToken();
+
 function App() {
   useEffect(() => {
+    consumeUrlSsoToken();
+    const allowedOrigins = new Set([
+      'https://mega.ruptur.cloud',
+      'https://app.ruptur.cloud',
+      'https://atendimento.ruptur.cloud',
+    ]);
     const receiveMegaSso = (event: MessageEvent) => {
-      if (event.origin !== 'https://mega.ruptur.cloud' || event.source !== window.parent) return;
+      if (!allowedOrigins.has(event.origin) || event.source !== window.parent) return;
       const token = event.data?.type === 'ruptur-mega-sso' ? event.data.token : '';
       if (!token || typeof token !== 'string') return;
       if (localStorage.getItem('auth_token') === token) return;
