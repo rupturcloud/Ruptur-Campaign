@@ -47,6 +47,11 @@ export function buildUazapiComposition(number: string, composition: any) {
   if (fields.file) fields.file = resolveMediaUrl(fields.file);
   if (fields.imageButton) fields.imageButton = resolveMediaUrl(fields.imageButton);
 
+  if (endpoint === '/send/menu') {
+    if (fields.file && !fields.imageButton) fields.imageButton = fields.file;
+    delete fields.file;
+  }
+
   const structuredChoices = Array.isArray(buttons) ? buttons.map((button: any) => {
     if (!button?.text?.trim() || !button?.value?.trim()) throw new Error('Todo botão precisa de texto e destino');
     return `${button.text.trim()}|${button.value.trim()}`;
@@ -99,7 +104,17 @@ export function buildUazapiComposition(number: string, composition: any) {
     : { ...fields, ...(formattedText !== undefined ? { text: formattedText } : {}), number, async: false, track_source: 'ruptur-campaign',
         ...(['/send/menu', '/send/media'].includes(endpoint) ? { type } : {}),
         ...(structuredChoices ? { choices: structuredChoices } : {}) };
-  validate(payload, (schemas as any)[endpoint], 'mensagem');
+
+  const schema = (schemas as any)[endpoint];
+  if (schema?.properties) {
+    for (const key of Object.keys(payload)) {
+      if (!schema.properties[key]) {
+        delete payload[key];
+      }
+    }
+  }
+
+  validate(payload, schema, 'mensagem');
   if (endpoint === '/send/menu' && (!payload.text?.trim() || !payload.choices?.length || payload.choices.some((v: string) => !v.trim()))) throw new Error('Informe o texto e as opções do menu');
   if (endpoint === '/send/carousel' && (!payload.text?.trim() || !payload.carousel?.length || payload.carousel.some((c: any) => !c.text?.trim() || !c.buttons?.length))) throw new Error('Informe o texto, cartões e botões do carrossel');
   if (type === 'location' && (Math.abs(payload.latitude) > 90 || Math.abs(payload.longitude) > 180)) throw new Error('Coordenadas inválidas');
