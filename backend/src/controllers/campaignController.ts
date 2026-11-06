@@ -555,6 +555,105 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
   }
 };
 
+// Duplicate campaign or draft as a new DRAFT
+export const duplicateCampaign = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const where: any = { id };
+    if (req.user?.role !== 'SUPERADMIN' && req.tenantId) {
+      where.OR = [
+        { tenantId: req.tenantId },
+        { tenantId: null }
+      ];
+    }
+
+    const existing = await prisma.campaign.findFirst({
+      where,
+      include: {
+        messages: {
+          orderBy: { priority: 'asc' }
+        }
+      }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Campanha não encontrada' });
+    }
+
+    let resolvedSessionName: string | null = existing.sessionName || null;
+    if (resolvedSessionName) {
+      const existingSession = await prisma.whatsAppSession.findUnique({
+        where: { name: resolvedSessionName },
+        select: { name: true }
+      });
+      if (!existingSession) resolvedSessionName = null;
+    }
+
+    const duplicatedName = req.body?.nome?.trim() || `${existing.nome} (Cópia)`;
+
+    const duplicated = await prisma.campaign.create({
+      data: {
+        nome: duplicatedName,
+        targetTags: existing.targetTags || '[]',
+        sessionNames: existing.sessionNames || '[]',
+        sessionName: resolvedSessionName,
+        messageType: existing.messageType || 'text',
+        messageContent: existing.messageContent || JSON.stringify({ text: '' }),
+        randomDelay: existing.randomDelay || 30,
+        startImmediately: false,
+        scheduledFor: null,
+        totalContacts: existing.messages.length,
+        sentCount: 0,
+        failedCount: 0,
+        status: 'DRAFT',
+        startedAt: null,
+        completedAt: null,
+        createdBy: req.user?.id || existing.createdBy,
+        createdByName: req.user?.nome || existing.createdByName,
+        tenantId: req.tenantId || existing.tenantId
+      }
+    });
+
+    if (existing.messages.length > 0) {
+      await prisma.campaignMessage.createMany({
+        data: existing.messages.map((msg) => ({
+          campaignId: duplicated.id,
+          contactId: msg.contactId,
+          contactPhone: msg.contactPhone,
+          contactName: msg.contactName,
+          tenantId: duplicated.tenantId,
+          priority: msg.priority ?? 0,
+          status: 'PENDING',
+          sentAt: null,
+          errorMessage: null
+        }))
+      });
+    }
+
+    const safeParse = (val: any, fallback: any = {}) => {
+      try {
+        if (!val) return fallback;
+        return typeof val === 'string' ? JSON.parse(val) : val;
+      } catch {
+        return fallback;
+      }
+    };
+
+    res.status(201).json({
+      message: 'Campanha duplicada como rascunho com sucesso',
+      campaign: {
+        ...duplicated,
+        targetTags: safeParse(duplicated.targetTags, []),
+        sessionNames: duplicated.sessionNames ? safeParse(duplicated.sessionNames, []) : [],
+        messageContent: safeParse(duplicated.messageContent, {})
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao duplicar campanha:', error);
+    res.status(500).json({ error: 'Erro interno do servidor ao duplicar campanha' });
+  }
+};
+
 // Delete campaign
 export const deleteCampaign = async (req: AuthenticatedRequest, res: Response) => {
   try {

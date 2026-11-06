@@ -4,6 +4,7 @@ import {
   getCampaign,
   createCampaign,
   updateCampaign,
+  duplicateCampaign,
   deleteCampaign,
   toggleCampaign,
   getCampaignReport,
@@ -29,6 +30,7 @@ router.get('/:id/telemetry/live', authMiddleware, getCampaignLiveTelemetry);
 router.get('/:id/dyno', authMiddleware, getCampaignLiveTelemetry);
 router.get('/:id/report/download', authMiddleware, downloadCampaignReport);
 router.post('/', authMiddleware, campaignValidation, checkCampaignQuota, createCampaign);
+router.post('/:id/duplicate', authMiddleware, duplicateCampaign);
 router.put('/:id', authMiddleware, updateCampaign);
 router.delete('/:id', authMiddleware, deleteCampaign);
 router.patch('/:id/toggle', authMiddleware, toggleCampaign);

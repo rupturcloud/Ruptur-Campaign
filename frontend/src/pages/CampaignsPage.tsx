@@ -592,6 +592,53 @@ export function CampaignsPage() {
     setShowCreateModal(true);
   };
 
+  const handleDuplicateCampaign = async (campaign: Campaign) => {
+    try {
+      const duplicatedName = `${campaign.nome} (Cópia)`;
+      let response = await authenticatedFetch(`/api/campaigns/${campaign.id}/duplicate`, {
+        method: 'POST',
+        body: JSON.stringify({ nome: duplicatedName })
+      });
+
+      if (response.status === 404 || response.status === 405) {
+        const content: any = campaign.messageContent;
+        const sequence = campaign.messageType === 'sequence' ? (content?.sequence || []) : [{ type: campaign.messageType, content }];
+        response = await authenticatedFetch('/api/campaigns', {
+          method: 'POST',
+          body: JSON.stringify({
+            nome: duplicatedName,
+            targetTags: campaign.targetTags || [],
+            manualPhones: '',
+            sessionNames: campaign.sessionNames || [],
+            sessionName: campaign.sessionName || '',
+            messageType: sequence.length > 1 ? 'sequence' : (sequence[0]?.type || campaign.messageType || 'text'),
+            messageContent: sequence.length > 1 ? { sequence } : (sequence[0]?.content ?? campaign.messageContent),
+            randomDelay: campaign.randomDelay || 30,
+            sendMode: 'draft',
+            status: 'DRAFT',
+            startImmediately: false,
+            scheduledFor: null
+          })
+        });
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}`);
+      }
+
+      toast.success(`Campanha "${campaign.nome}" duplicada como rascunho!`);
+      loadCampaigns();
+    } catch (error) {
+      console.error('Erro ao duplicar campanha:', error);
+      toast.error(error instanceof Error ? error.message : 'Erro ao duplicar campanha');
+    }
+  };
+
+  const _noopAfterDuplicate = () => {
+    setShowCreateModal(true);
+  };
+
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
   };
@@ -1299,6 +1346,18 @@ export function CampaignsPage() {
                       )}
                       {campaign.status !== 'RUNNING' && (
                         <button onClick={() => handleEditCampaign(campaign)} className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700" title="Editar campanha">✎</button>
+                      )}
+                      <button
+                        onClick={() => handleDuplicateCampaign(campaign)}
+                        className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded flex items-center gap-1 shadow-sm font-medium transition"
+                        title="Duplicar esta campanha ou rascunho"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <span className="hidden md:inline">Duplicar</span>
+                      </button>
+                      {false && (null
                       )}
                       {campaign.status === 'RUNNING' && (
                         <button
