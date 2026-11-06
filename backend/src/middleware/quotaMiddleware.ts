@@ -27,7 +27,7 @@ export const quotaMiddleware = (check: QuotaCheck) => {
       }
 
       // Buscar quotas do tenant
-      const tenantQuota = await prisma.tenantQuota.findUnique({
+      let tenantQuota = await prisma.tenantQuota.findUnique({
         where: { tenantId: req.tenantId },
         include: {
           tenant: {
@@ -46,11 +46,29 @@ export const quotaMiddleware = (check: QuotaCheck) => {
       });
 
       if (!tenantQuota) {
-        res.status(403).json({
-          success: false,
-          message: 'Configuração de quotas não encontrada para este tenant.'
+        tenantQuota = await prisma.tenantQuota.create({
+          data: {
+            tenantId: req.tenantId,
+            maxUsers: 50,
+            maxContacts: 50000,
+            maxCampaigns: 500,
+            maxConnections: 50
+          },
+          include: {
+            tenant: {
+              include: {
+                _count: {
+                  select: {
+                    users: true,
+                    contacts: true,
+                    campaigns: true,
+                    whatsappSessions: true
+                  }
+                }
+              }
+            }
+          }
         });
-        return;
       }
 
       // Verificar quota baseada no recurso

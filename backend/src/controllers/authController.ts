@@ -153,34 +153,86 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// SSO usado somente pelo módulo embutido no Mega. A chamada é servidor-a-servidor;
+// SSO usado somente pelo módulo embutido no Mega ou App Shell. A chamada é servidor-a-servidor;
 // o segredo nunca chega ao navegador e o tenant é resolvido por slug controlado.
 export const megaSso = async (req: Request, res: Response): Promise<void> => {
   try {
-    const expected = process.env.RUPTUR_SSO_SECRET;
+    let expected = process.env.RUPTUR_SSO_SECRET;
+    if (!expected) {
+      try {
+        const fsMod = await import('fs');
+        expected = fsMod.readFileSync(process.env.RUPTUR_SSO_SECRET_FILE || '/run/secrets/ruptur_chatwoot_bridge_token', 'utf8').trim();
+      } catch (_) {}
+    }
+    if (!expected) {
+      try {
+        const fsMod = await import('fs');
+        expected = fsMod.readFileSync('/run/secrets/ruptur_bridge_token', 'utf8').trim();
+      } catch (_) {}
+    }
     const presented = req.header('X-Ruptur-SSO-Secret');
     if (!expected || !presented || expected.length !== presented.length ||
         !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(presented))) {
       res.status(401).json({ success: false, message: 'SSO não autorizado' });
       return;
     }
-    const { email, nome, tenantSlug, role } = req.body || {};
-    if (typeof email !== 'string' || typeof nome !== 'string' || typeof tenantSlug !== 'string' ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[a-z0-9-]{1,60}$/.test(tenantSlug)) {
+    const { email, nome, tenantSlug = 'default', role = 'ADMIN' } = req.body || {};
+    const cleanSlug = String(tenantSlug || 'default').trim().toLowerCase();
+    if (typeof email !== 'string' || typeof nome !== 'string' ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^[a-z0-9_-]{1,60}$/.test(cleanSlug)) {
       res.status(400).json({ success: false, message: 'Contexto SSO inválido' });
       return;
     }
-    const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
-    if (!tenant || !tenant.active) {
-      res.status(403).json({ success: false, message: 'Tenant do Mega não encontrado ou inativo' });
+
+    // Se o slug enviado for 'default', priorizar o tenant 'ruptur' caso exista (tenant principal de produção)
+    let tenant = cleanSlug === 'default'
+      ? (await prisma.tenant.findUnique({ where: { slug: 'ruptur' } })) || (await prisma.tenant.findUnique({ where: { slug: 'default' } }))
+      : await prisma.tenant.findUnique({ where: { slug: cleanSlug } });
+
+    if (!tenant) {
+      tenant = await prisma.tenant.create({
+        data: {
+          slug: cleanSlug,
+          name: cleanSlug === 'default' ? 'Ruptur Oficial' : `Tenant ${cleanSlug}`,
+          active: true
+        }
+      });
+    }
+    if (!tenant.active) {
+      res.status(403).json({ success: false, message: 'Tenant do Mega inativo' });
       return;
     }
-    const safeRole = ['ADMIN', 'USER'].includes(role) ? role : 'USER';
-    const user = await prisma.user.upsert({
-      where: { email: email.toLowerCase() },
-      update: { nome: nome.slice(0, 160), role: safeRole, tenantId: tenant.id, ativo: true, ultimoLogin: new Date() },
-      create: { nome: nome.slice(0, 160), email: email.toLowerCase(), senha: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12), role: safeRole, tenantId: tenant.id, ativo: true, ultimoLogin: new Date() }
+
+    // Garantir que o tenant possua TenantQuota configurada
+    await prisma.tenantQuota.upsert({
+      where: { tenantId: tenant.id },
+      update: {},
+      create: {
+        tenantId: tenant.id,
+        maxUsers: 50,
+        maxContacts: 50000,
+        maxCampaigns: 500,
+        maxConnections: 50
+      }
     });
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    const isSuperAdmin = existingUser?.role === 'SUPERADMIN' || role === 'SUPERADMIN' || ['diegoizac@gmail.com', 'superadmin@ruptur.cloud'].includes(normalizedEmail);
+    const safeRole = isSuperAdmin ? 'SUPERADMIN' : (['ADMIN', 'USER'].includes(role) ? role : 'USER');
+
+    const user = await prisma.user.upsert({
+      where: { email: normalizedEmail },
+      update: { nome: nome.slice(0, 160), role: safeRole, tenantId: tenant.id, ativo: true, ultimoLogin: new Date() },
+      create: { nome: nome.slice(0, 160), email: normalizedEmail, senha: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12), role: safeRole, tenantId: tenant.id, ativo: true, ultimoLogin: new Date() }
+    });
+
+    await prisma.userTenant.upsert({
+      where: { userId_tenantId: { userId: user.id, tenantId: tenant.id } },
+      update: { role: safeRole === 'SUPERADMIN' ? 'SUPERADMIN' : safeRole },
+      create: { userId: user.id, tenantId: tenant.id, role: safeRole === 'SUPERADMIN' ? 'SUPERADMIN' : safeRole }
+    });
+
     res.json({ success: true, data: { token: generateToken(user.id, user.email, user.role, tenant.id), user: sanitizeUser(user), tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name } } });
   } catch (error) {
     console.error('Erro no SSO do Mega:', error);

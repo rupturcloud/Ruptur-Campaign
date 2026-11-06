@@ -523,8 +523,8 @@ export function CampaignsPage() {
         if (errorData.errors && errorData.errors.length > 0) {
           const validationErrors = errorData.errors.map((err: any) => err.msg).join(', ');
           throw new Error(validationErrors);
-        } else if (errorData.error) {
-          throw new Error(errorData.error);
+        } else if (errorData.error || errorData.message) {
+          throw new Error(errorData.error || errorData.message);
         } else {
           throw new Error(`HTTP ${response.status}`);
         }

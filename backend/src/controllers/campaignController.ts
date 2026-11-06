@@ -331,15 +331,22 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
       }
     }
 
+    // Verificar se a primeira sessão existe antes de vincular a FK sessionName (especialmente em rascunhos)
+    let resolvedSessionName: string | null = (Array.isArray(sessionNames) && sessionNames[0]) || null;
+    if (resolvedSessionName) {
+      const existingSession = await prisma.whatsAppSession.findUnique({ where: { name: resolvedSessionName }, select: { name: true } });
+      if (!existingSession) resolvedSessionName = null;
+    }
+
     // Criar campanha
     const campaign = await prisma.campaign.create({
       data: {
         nome,
         targetTags: JSON.stringify(targetTags || []),
         sessionNames: JSON.stringify(sessionNames || []),
-        sessionName: (sessionNames && sessionNames[0]) || null, // Para compatibilidade
-        messageType,
-        messageContent: JSON.stringify(messageContent),
+        sessionName: resolvedSessionName, // Para compatibilidade
+        messageType: messageType || 'text',
+        messageContent: JSON.stringify(messageContent ?? { text: '' }),
         randomDelay: randomDelay || 30,
         startImmediately: willStartImmediately,
         scheduledFor: finalScheduledFor,
