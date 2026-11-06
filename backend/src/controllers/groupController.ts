@@ -114,5 +114,84 @@ export async function createLeadList(req: AuthenticatedRequest, res: Response) {
 }
 export async function getLeadList(req: AuthenticatedRequest, res: Response) { const list = await prisma.leadList.findFirst({ where: { id: req.params.id, tenantId: tenant(req)! }, include: { members: { include: { lead: true } } } }); if (!list) return res.status(404).json({ error: 'Lista não encontrada' }); res.json(list); }
 export async function addListMembers(req: AuthenticatedRequest, res: Response) { const list = await prisma.leadList.findFirst({ where: { id: req.params.id, tenantId: tenant(req)! } }); if (!list) return res.status(404).json({ error: 'Lista não encontrada' }); const ids = Array.isArray(req.body?.leadIds) ? req.body.leadIds : []; await prisma.leadListMember.createMany({ data: ids.map((leadId: string) => ({ tenantId: list.tenantId, listId: list.id, leadId })), skipDuplicates: true }); res.json({ added: ids.length }); }
-export async function promoteLeads(req: AuthenticatedRequest, res: Response) { const tenantId = tenant(req)!; const ids = Array.isArray(req.body?.leadIds) ? req.body.leadIds : []; const tag = String(req.body?.tag || '').trim(); const leads = await prisma.lead.findMany({ where: { tenantId, id: { in: ids } } }); const contacts = await prisma.$transaction(async tx => Promise.all(leads.map(async lead => { const current = await tx.contact.findFirst({ where: { tenantId, telefone: lead.telefone } }); const tags = [...new Set([...(current?.tags || []), ...(lead.tags || []), ...(tag ? [tag] : [])])]; return current ? tx.contact.update({ where: { id: current.id }, data: { nome: lead.nome || current.nome, tags } }) : tx.contact.create({ data: { tenantId, nome: lead.nome, telefone: lead.telefone, tags } }); }))); res.json({ count: contacts.length, contacts }); }
+export async function promoteLeads(req: AuthenticatedRequest, res: Response) {
+  const tenantId = tenant(req)!;
+  const ids = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
+  const tag = String(req.body?.tag || req.body?.categoryName || '').trim();
+  const leads = await prisma.lead.findMany({ where: { tenantId, id: { in: ids } } });
+  const result = await prisma.$transaction(async tx => {
+    let category: { id: string; nome: string } | null = null;
+    if (tag) {
+      category = await tx.category.findFirst({ where: { tenantId, nome: { equals: tag, mode: 'insensitive' } } });
+      if (!category) {
+        category = await tx.category.create({
+          data: { tenantId, nome: tag, cor: '#6366f1', descricao: 'Categoria criada a partir da extração de grupos WhatsApp' }
+        });
+      }
+    }
+    const contacts = await Promise.all(leads.map(async lead => {
+      const current = await tx.contact.findFirst({ where: { tenantId, telefone: lead.telefone } });
+      const tags = [...new Set([...(current?.tags || []), ...(lead.tags || []), ...(tag ? [tag] : [])])];
+      return current
+        ? tx.contact.update({
+            where: { id: current.id },
+            data: { nome: lead.nome || current.nome, tags, ...(category ? { categoriaId: category.id } : {}) }
+          })
+        : tx.contact.create({
+            data: { tenantId, nome: lead.nome, telefone: lead.telefone, tags, ...(category ? { categoriaId: category.id } : {}) }
+          });
+    }));
+    return { contacts, category };
+  });
+  res.json({ count: result.contacts.length, categoryId: result.category?.id || null, categoryName: result.category?.nome || null, contacts: result.contacts });
+}
+
+export async function promoteLeadList(req: AuthenticatedRequest, res: Response) {
+  const tenantId = tenant(req)!;
+  const list = await prisma.leadList.findFirst({
+    where: { id: req.params.id, tenantId },
+    include: { members: { include: { lead: true } } }
+  });
+  if (!list) return res.status(404).json({ error: 'Lista não encontrada' });
+  const categoryName = String(req.body?.categoryName || list.nome).trim();
+  const result = await prisma.$transaction(async tx => {
+    let category = await tx.category.findFirst({ where: { tenantId, nome: { equals: categoryName, mode: 'insensitive' } } });
+    if (!category) {
+      category = await tx.category.create({
+        data: { tenantId, nome: categoryName, cor: '#6366f1', descricao: list.motivo || 'Lista extraída de grupos WhatsApp' }
+      });
+    }
+    const contacts = await Promise.all(list.members.map(async member => {
+      const lead = member.lead;
+      const current = await tx.contact.findFirst({ where: { tenantId, telefone: lead.telefone } });
+      const tags = [...new Set([...(current?.tags || []), ...(lead.tags || []), categoryName])];
+      return current
+        ? tx.contact.update({
+            where: { id: current.id },
+            data: { nome: lead.nome || current.nome, tags, categoriaId: category.id }
+          })
+        : tx.contact.create({
+            data: { tenantId, nome: lead.nome, telefone: lead.telefone, tags, categoriaId: category.id }
+          });
+    }));
+    return { contacts, category };
+  });
+  res.json({
+    count: result.contacts.length,
+    categoryId: result.category.id,
+    categoryName: result.category.nome,
+    phones: list.members.map(m => m.lead.telefone)
+  });
+}
+
+export async function deleteLeadList(req: AuthenticatedRequest, res: Response) {
+  const tenantId = tenant(req)!;
+  const list = await prisma.leadList.findFirst({ where: { id: req.params.id, tenantId } });
+  if (!list) return res.status(404).json({ error: 'Lista não encontrada' });
+  await prisma.$transaction([
+    prisma.leadListMember.deleteMany({ where: { listId: list.id, tenantId } }),
+    prisma.leadList.delete({ where: { id: list.id } })
+  ]);
+  res.json({ deleted: true, id: list.id });
+}
 export async function exportLeadList(req: AuthenticatedRequest, res: Response) { const list = await prisma.leadList.findFirst({ where: { id: req.params.id, tenantId: tenant(req)! }, include: { members: { include: { lead: true } } } }); if (!list) return res.status(404).json({ error: 'Lista não encontrada' }); const data = list.members.map(m => ({ nome: m.lead.nome, telefone: m.lead.telefone, tags: m.lead.tags.join(',') })); const format = String(req.query.format || 'csv'); if (format === 'txt') { res.type('text/plain').send(data.map(x => x.telefone).join('\n')); return; } if (format === 'xlsx') { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Leads'); const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }); res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(buffer); return; } res.type('text/csv').send(['nome,telefone,tags', ...data.map(x => `${JSON.stringify(x.nome)},${x.telefone},${JSON.stringify(x.tags)}`)].join('\n')); }

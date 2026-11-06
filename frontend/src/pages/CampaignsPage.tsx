@@ -293,7 +293,21 @@ export function CampaignsPage() {
     loadContactTags();
     loadWhatsAppSessions();
     const groupLeads = localStorage.getItem('ruptur_campaign_group_leads');
-    if (groupLeads) { setFormData(prev => ({ ...prev, manualPhones: groupLeads })); localStorage.removeItem('ruptur_campaign_group_leads'); setShowCreateModal(true); toast.success('Leads dos grupos carregados na campanha'); }
+    const groupCategory = localStorage.getItem('ruptur_campaign_group_category');
+    const groupListName = localStorage.getItem('ruptur_campaign_group_name');
+    if (groupLeads || groupCategory) {
+      setFormData(prev => ({
+        ...prev,
+        nome: groupListName ? `Disparo · ${groupListName}` : prev.nome,
+        targetTags: groupCategory ? [groupCategory] : prev.targetTags,
+        manualPhones: groupCategory ? prev.manualPhones : (groupLeads || '')
+      }));
+      localStorage.removeItem('ruptur_campaign_group_leads');
+      localStorage.removeItem('ruptur_campaign_group_category');
+      localStorage.removeItem('ruptur_campaign_group_name');
+      setShowCreateModal(true);
+      toast.success('Lista de grupos carregada e pronta para disparo!');
+    }
   }, []);
 
   // Helper para fazer requisições autenticadas
@@ -1161,6 +1175,44 @@ export function CampaignsPage() {
           <div className="px-6 py-3.5 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2.5">
               <h3 className="text-base font-semibold text-gray-900">Campanhas Criadas</h3>
+              {campaigns.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const headers = ['ID', 'Nome da Campanha', 'Status', 'Instâncias', 'Total Contatos', 'Enviadas', 'Falhas', 'Taxa de Entrega (%)', 'Criada em'];
+                    const rows = campaigns.map(c => {
+                      const total = c.totalContacts || 0;
+                      const sent = c.sentCount || 0;
+                      const failed = c.failedCount || 0;
+                      const rate = total > 0 ? Math.round((sent / total) * 100) : 0;
+                      const insts = (c.sessionNames && c.sessionNames.length > 0) ? c.sessionNames.join(' | ') : (c.sessionName || '');
+                      return [
+                        c.id,
+                        `"${String(c.nome || '').replace(/"/g, '""')}"`,
+                        c.status,
+                        `"${String(insts).replace(/"/g, '""')}"`,
+                        total,
+                        sent,
+                        failed,
+                        `${rate}%`,
+                        c.createdAt ? new Date(c.createdAt).toLocaleString('pt-BR') : ''
+                      ].join(',');
+                    });
+                    const csv = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `relatorio-campanhas-ruptur-${new Date().toISOString().slice(0, 10)}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="text-xs text-emerald-700 hover:text-emerald-900 flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 font-semibold transition-colors"
+                  title="Exportar relatório completo de campanhas e métricas em CSV (Excel)"
+                >
+                  📥 Exportar CSV
+                </button>
+              )}
               <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
                 Total: {totalCampaignsCount}
               </span>
