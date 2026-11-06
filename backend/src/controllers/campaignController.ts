@@ -6,6 +6,7 @@ import { CategoryService } from '../services/categoryService';
 import { AuthenticatedRequest } from '../middleware/auth';
 import { uazapiService } from '../services/uazapiService';
 import { sessionBreaker, classifyDispatchError } from '../services/dispatchGuard';
+import { fleetIntegrationService } from '../services/fleetIntegrationService';
 
 const prisma = new PrismaClient();
 
@@ -906,14 +907,21 @@ export const getCampaignReport = async (req: AuthenticatedRequest, res: Response
 // Get available contact tags (categories)
 export const getContactTags = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Buscar categorias usando CategoryService com tenant isolation
     const tenantId = req.tenantId;
-    const categoriesResponse = await CategoryService.getCategories(undefined, 1, 999999, tenantId);
+    const categories = await prisma.category.findMany({
+      where: tenantId ? { tenantId } : {},
+      include: {
+        _count: {
+          select: { contacts: true }
+        }
+      },
+      orderBy: { criadoEm: 'desc' }
+    });
 
-    // Retornar array com id e nome das categorias
-    const tags = categoriesResponse.categories.map((categoria: any) => ({
+    const tags = categories.map((categoria: any) => ({
       id: categoria.id,
-      nome: categoria.nome
+      nome: categoria.nome,
+      contactCount: categoria._count?.contacts || 0
     }));
 
     res.json(tags);
@@ -968,7 +976,64 @@ export const getActiveSessions = async (req: AuthenticatedRequest, res: Response
       }
     });
 
-    res.json(sessions);
+    let overview: any = null;
+    try {
+      overview = await fleetIntegrationService.getFleetCapacityOverview(req.tenantId || 'default');
+    } catch (err) {
+      console.warn('Falha ao consultar telemetria do aquecedor:', err);
+    }
+
+    const enrichedSessions = sessions.map(session => {
+      const rawPhone = (session.meId || session.meJid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+      const sName = session.name.toLowerCase();
+      const sDisplay = (session.displayName || '').toLowerCase();
+      
+      const matched = overview?.instances?.find((inst: any) => {
+        const instPhone = (inst.phone || '').replace(/\D/g, '');
+        const instName = (inst.name || '').toLowerCase();
+        return (
+          (rawPhone && instPhone && (rawPhone === instPhone || rawPhone.endsWith(instPhone) || instPhone.endsWith(rawPhone))) ||
+          instName === sName ||
+          (sDisplay && instName === sDisplay)
+        );
+      });
+
+      const fallbackMaturity = {
+        phase: 'WARM',
+        score: 0.85,
+        label: 'Aquecido (Comercial)',
+        maxDailyCap: 150,
+        minDelaySeconds: 15,
+        maxDelaySeconds: 25,
+        recommendedDelaySeconds: 20
+      };
+
+      const fallbackCapacity = {
+        cap: 150,
+        used24h: 0,
+        reserved: 0,
+        available: 135,
+        buffer: 15
+      };
+
+      const fallbackDispatch = {
+        isLocked: false,
+        campaignId: null,
+        inCooldown: false,
+        cooldownRemainingMinutes: 0,
+        status: 'READY'
+      };
+
+      return {
+        ...session,
+        maturity: matched?.maturity || fallbackMaturity,
+        capacity: matched?.capacity || fallbackCapacity,
+        dispatch: matched?.dispatch || fallbackDispatch,
+        healthScore: matched?.healthScore ?? 100
+      };
+    });
+
+    res.json(enrichedSessions);
   } catch (error) {
     console.error('Erro ao buscar sessões ativas:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });

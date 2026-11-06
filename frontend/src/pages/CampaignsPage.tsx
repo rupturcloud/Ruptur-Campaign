@@ -56,6 +56,30 @@ interface WhatsAppSession {
   profilePicUrl?: string | null;
   provider?: string;
   status?: string;
+  maturity?: {
+    phase: 'COLD' | 'WARMING' | 'WARM' | 'MATURE';
+    score: number;
+    label: string;
+    maxDailyCap: number;
+    minDelaySeconds: number;
+    maxDelaySeconds: number;
+    recommendedDelaySeconds: number;
+  };
+  capacity?: {
+    cap: number;
+    used24h: number;
+    reserved: number;
+    available: number;
+    buffer: number;
+  };
+  dispatch?: {
+    isLocked: boolean;
+    campaignId: string | null;
+    inCooldown: boolean;
+    cooldownRemainingMinutes: number;
+    status: 'READY' | 'DISPATCHING' | 'COOLDOWN' | 'RESTRICTED';
+  };
+  healthScore?: number;
 }
 
 function formatSessionPhone(session?: Partial<WhatsAppSession> | null, fallbackName?: string): string {
@@ -206,6 +230,7 @@ function SessionAvatar({
 interface ContactTag {
   id: string;
   nome: string;
+  contactCount?: number;
 }
 
 function compositionForPreview(item: { type: string; content: any } | undefined) {
@@ -272,6 +297,7 @@ export function CampaignsPage() {
   const [dragOverTagIndex, setDragOverTagIndex] = useState<number | null>(null);
   const [sessionSearch, setSessionSearch] = useState('');
   const [sessionFilterTab, setSessionFilterTab] = useState<'all' | 'selected' | 'unselected'>('all');
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -471,6 +497,11 @@ export function CampaignsPage() {
       return;
     }
 
+    if (formData.sendMode !== 'draft' && capacityDeficit > 0 && !riskAcknowledged) {
+      toast.error('Confirmação necessária: marque o duplo check abaixo para autorizar o disparo com volume superior à capacidade diária recomendada.');
+      return;
+    }
+
     if (!formData.nome.trim()) {
       toast.error('Informe o nome da campanha');
       return;
@@ -572,6 +603,7 @@ export function CampaignsPage() {
     setUploadingFiles({});
     setFileInfos({});
     setDraggedIndex(null);
+    setRiskAcknowledged(false);
   };
 
   const handleEditCampaign = (campaign: Campaign) => {
@@ -603,6 +635,7 @@ export function CampaignsPage() {
       scheduledFor: campaign.scheduledFor ? campaign.scheduledFor.slice(0, 16) : ''
     });
     setEditingCampaignId(campaign.id);
+    setRiskAcknowledged(false);
     setShowCreateModal(true);
   };
 
@@ -1075,6 +1108,38 @@ export function CampaignsPage() {
   const totalOverallPercent = totalContactsCount > 0 ? Math.round((totalSentCount / totalContactsCount) * 100) : 0;
   const totalProcessedPercent = totalContactsCount > 0 ? Math.round((totalProcessedCount / totalContactsCount) * 100) : 0;
   const runningCampaignsCount = campaigns.filter(c => c.status === 'RUNNING').length;
+
+  // Cálculos de dimensionamento da audiência e capacidade combinada
+  const manualCount = formData.manualPhones
+    ? formData.manualPhones.split(/[\n,;]+/).map(p => p.trim()).filter(Boolean).length
+    : 0;
+
+  const selectedTagsContacts = formData.targetTags.reduce((sum, tagId) => {
+    const tag = contactTags.find(t => t.id === tagId);
+    return sum + (tag?.contactCount || 0);
+  }, 0);
+
+  const estimatedAudience = selectedTagsContacts + manualCount;
+
+  const selectedSessionsList = whatsappSessions.filter(s => formData.sessionNames.includes(s.name));
+  const combinedAvailableCapacity = selectedSessionsList.reduce((sum, s) => sum + (s.capacity?.available ?? 20), 0);
+  const combinedDailyCap = selectedSessionsList.reduce((sum, s) => sum + (s.capacity?.cap ?? 20), 0);
+  
+  const avgPacingSeconds = selectedSessionsList.length > 0
+    ? Math.round(selectedSessionsList.reduce((sum, s) => sum + (s.maturity?.recommendedDelaySeconds ?? 35), 0) / selectedSessionsList.length)
+    : 35;
+
+  const conservativeDurationHours = estimatedAudience > 0
+    ? ((estimatedAudience * Math.max(30, avgPacingSeconds)) / 3600).toFixed(1)
+    : '0';
+
+  const acceleratedPacingSeconds = Math.max(10, Math.min(15, formData.randomDelay || 15));
+  const acceleratedDurationHours = estimatedAudience > 0
+    ? ((estimatedAudience * acceleratedPacingSeconds) / 3600).toFixed(1)
+    : '0';
+
+  const capacityDeficit = Math.max(0, estimatedAudience - combinedAvailableCapacity);
+  const recommendedExtraChips = capacityDeficit > 0 ? Math.ceil(capacityDeficit / 60) : 0;
 
   return (
     <>
@@ -1621,6 +1686,100 @@ export function CampaignsPage() {
                       </p>
                     </div>
 
+                    {/* Consolidador de Capacidade & Dimensionamento Operacional */}
+                    <div className="rounded-xl border border-gray-200 bg-gradient-to-b from-gray-50 to-white p-3.5 shadow-sm mb-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-2 border-b border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">⚡</span>
+                          <h4 className="text-sm font-bold text-gray-900">
+                            Dimensionamento de Capacidade & Ritmo Seguro
+                          </h4>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                          <span className="text-gray-500">Audiência:</span>
+                          <span className="font-bold text-gray-900 bg-gray-100 px-2 py-0.5 rounded-md border border-gray-300">
+                            👥 {estimatedAudience.toLocaleString('pt-BR')} leads
+                          </span>
+                          <span className="text-gray-300">|</span>
+                          <span className="text-gray-500">Capacidade da Frota:</span>
+                          <span className={`font-bold px-2 py-0.5 rounded-md border ${
+                            capacityDeficit > 0
+                              ? 'bg-amber-100 text-amber-900 border-amber-300'
+                              : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          }`}>
+                            🔋 {combinedAvailableCapacity.toLocaleString('pt-BR')} msgs/dia
+                          </span>
+                        </div>
+                      </div>
+
+                      {selectedSessionsList.length === 0 ? (
+                        <p className="text-xs text-gray-500 py-1">
+                          ℹ️ Selecione as conexões WhatsApp abaixo para dimensionar tempo, ritmo e capacidade combinada de envio.
+                        </p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {capacityDeficit > 0 ? (
+                            <div className="p-2.5 bg-amber-50/90 border border-amber-300 rounded-lg text-xs text-amber-900 space-y-1">
+                              <div className="flex items-center gap-1.5 font-bold text-amber-950">
+                                <span>⚠️</span>
+                                <span>Audiência ({estimatedAudience.toLocaleString('pt-BR')} leads) excede a capacidade diária recomendada ({combinedAvailableCapacity.toLocaleString('pt-BR')} msgs)</span>
+                              </div>
+                              <p className="text-amber-800 text-[11px] leading-relaxed">
+                                Déficit de <strong>{capacityDeficit.toLocaleString('pt-BR')} disparos</strong> hoje. Para absorver sem aceleração, você pode <strong>estender o tempo da campanha</strong> ou <strong>adicionar +{recommendedExtraChips} instância(s)</strong> de suporte.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="p-2 bg-emerald-50 border border-emerald-300 rounded-lg text-xs text-emerald-900 flex items-center justify-between gap-2">
+                              <span>✅ <strong>Capacidade Adequada:</strong> A frota selecionada absorve os {estimatedAudience.toLocaleString('pt-BR')} leads com folga e segurança.</span>
+                              <span className="font-semibold text-emerald-800 text-[11px]">
+                                {estimatedAudience > 0 ? Math.round((estimatedAudience / (combinedAvailableCapacity || 1)) * 100) : 0}% da frota
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Comparativo de Cenários */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            <div className="p-2 rounded-lg border border-blue-200 bg-blue-50/60">
+                              <div className="flex items-center justify-between font-bold text-blue-900 mb-0.5">
+                                <span>🛡️ Ritmo Seguro (Maturidade)</span>
+                                <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 font-mono text-[11px]">~{conservativeDurationHours}h</span>
+                              </div>
+                              <p className="text-blue-800 text-[11px]">
+                                Intervalo inteligente de <strong>~{avgPacingSeconds}s</strong> adaptado à saúde e maturidade dos chips.
+                              </p>
+                            </div>
+
+                            <div className="p-2 rounded-lg border border-purple-200 bg-purple-50/60">
+                              <div className="flex items-center justify-between font-bold text-purple-900 mb-0.5">
+                                <span>⚡ Ritmo Acelerado</span>
+                                <span className="px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 font-mono text-[11px]">~{acceleratedDurationHours}h</span>
+                              </div>
+                              <p className="text-purple-800 text-[11px]">
+                                Intervalo de <strong>~{acceleratedPacingSeconds}s</strong> ({formData.randomDelay}s delay). Requer duplo check caso exceda o teto seguro.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Duplo Check Não-Bloqueante */}
+                          {capacityDeficit > 0 && formData.sendMode !== 'draft' && (
+                            <div className="p-2.5 bg-amber-100/80 border border-amber-400 rounded-lg">
+                              <label className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={riskAcknowledged}
+                                  onChange={(e) => setRiskAcknowledged(e.target.checked)}
+                                  className="mt-0.5 h-4 w-4 text-amber-700 rounded border-amber-400 focus:ring-amber-500 flex-shrink-0"
+                                />
+                                <span className="text-xs text-amber-950 font-medium leading-relaxed select-none">
+                                  <strong>Confirmação Operacional (Duplo Check):</strong> Estou ciente de que o volume de {estimatedAudience.toLocaleString('pt-BR')} leads excede a capacidade diária recomendada ({combinedAvailableCapacity.toLocaleString('pt-BR')}) para a maturidade atual das instâncias e <u>autorizo o envio com aceleração operacional</u>.
+                                </span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     {/* Conexões WhatsApp — High-Scale Resource Selector (100+ instâncias) */}
                     <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
@@ -1788,13 +1947,38 @@ export function CampaignsPage() {
                                           👤 {pushName}
                                         </span>
                                       )}
-                                      <div className="mt-1 flex items-center gap-1">
+                                      <div className="mt-1 flex flex-wrap items-center gap-1">
                                         {formattedPhone ? (
                                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold bg-emerald-100/90 text-emerald-900 border border-emerald-200 truncate">
                                             📱 {formattedPhone}
                                           </span>
                                         ) : (
                                           <span className="text-[10px] text-gray-400 italic">Sem número identificado</span>
+                                        )}
+                                        {session.maturity?.phase === 'MATURE' && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+                                            ⭐ Maduro ({session.capacity?.available ?? 150} disp.)
+                                          </span>
+                                        )}
+                                        {session.maturity?.phase === 'WARM' && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-bold border border-orange-300">
+                                            🔥 Aquecido ({session.capacity?.available ?? 80} disp.)
+                                          </span>
+                                        )}
+                                        {session.maturity?.phase === 'WARMING' && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold border border-amber-300">
+                                            🌱 Aquecendo ({session.capacity?.available ?? 40} disp.)
+                                          </span>
+                                        )}
+                                        {(!session.maturity || session.maturity.phase === 'COLD') && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold border border-blue-300">
+                                            🧊 Frio ({session.capacity?.available ?? 15} disp.)
+                                          </span>
+                                        )}
+                                        {session.dispatch?.inCooldown && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-semibold border border-purple-300">
+                                            ⏳ Cooldown (~{session.dispatch.cooldownRemainingMinutes}m)
+                                          </span>
                                         )}
                                       </div>
                                     </div>

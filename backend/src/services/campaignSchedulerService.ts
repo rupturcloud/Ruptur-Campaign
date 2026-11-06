@@ -11,6 +11,7 @@ import { omnirouterService } from './omnirouterService';
 import { websocketService } from './websocketService';
 import { automationService, TriggerType } from './automationService';
 import { sessionBreaker, retryBudget, decideOnFailure } from './dispatchGuard';
+import { fleetIntegrationService } from './fleetIntegrationService';
 
 const prisma = new PrismaClient();
 
@@ -202,6 +203,13 @@ class CampaignSchedulerService {
           startedAt: new Date()
         }
       });
+
+      try {
+        const sessionNames = campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [campaign.sessionName].filter(Boolean);
+        await fleetIntegrationService.notifyCampaignLock('start', campaign.id, sessionNames, [], campaign.tenantId || 'default');
+      } catch (e) {
+        console.warn('Erro ao notificar início no aquecedor:', e);
+      }
 
       // Notificar via WebSocket o início da campanha
       if (campaign.tenantId && websocketService.isInitialized) {
@@ -1332,6 +1340,17 @@ class CampaignSchedulerService {
           completedAt: new Date()
         }
       });
+
+      try {
+        const fullCampaign = await prisma.campaign.findUnique({
+          where: { id: campaignId },
+          select: { sessionName: true, sessionNames: true, tenantId: true }
+        });
+        const sessionNames = fullCampaign?.sessionNames ? JSON.parse(fullCampaign.sessionNames) : [fullCampaign?.sessionName].filter(Boolean);
+        await fleetIntegrationService.notifyCampaignLock('finish', campaignId, sessionNames, [], fullCampaign?.tenantId || 'default');
+      } catch (e) {
+        console.warn('Erro ao notificar conclusão no aquecedor:', e);
+      }
 
       // Limpar índice da campanha do cache
       this.campaignSessionIndexes.delete(campaignId);
