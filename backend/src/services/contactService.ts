@@ -78,11 +78,34 @@ async function enrichContactsWithCategories(contactsList: any[]): Promise<any[]>
 
 export class ContactService {
   static normalizePhone(phone: string): string {
-    const phoneNumber = parsePhoneNumberFromString(phone, 'BR');
-    if (!phoneNumber || !phoneNumber.isValid()) {
-      throw new Error('Número de telefone inválido');
+    if (!phone) {
+      throw new Error('N?mero de telefone obrigat?rio');
     }
-    return phoneNumber.format('E.164');
+    const raw = String(phone).trim();
+
+    // 1. Tentar parse padr?o BR
+    let phoneNumber = parsePhoneNumberFromString(raw, 'BR');
+
+    // 2. Se falhar, tentar com prefixo + ou +55
+    if (!phoneNumber || !phoneNumber.isValid()) {
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length >= 10 && digits.length <= 13) {
+        const candidate = digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
+        phoneNumber = parsePhoneNumberFromString(candidate, 'BR');
+      }
+    }
+
+    if (phoneNumber && phoneNumber.isValid()) {
+      return phoneNumber.format('E.164');
+    }
+
+    // 3. Fallback resiliente para n?meros nacionais de 10 a 13 d?gitos
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length >= 10 && digits.length <= 13) {
+      return digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
+    }
+
+    throw new Error(`N?mero de telefone inv?lido: "${phone}"`);
   }
 
   static async getContacts(
@@ -180,6 +203,41 @@ export class ContactService {
       console.log('📝 ContactService.createContact - data recebido:', JSON.stringify(data, null, 2));
       const normalizedPhone = this.normalizePhone(data.telefone);
 
+      // Upsert por tenantId e telefone para evitar duplica??es e permitir enriquecimento de dados
+      const existingContact = await prisma.contact.findFirst({
+        where: {
+          telefone: normalizedPhone,
+          ...(data.tenantId ? { tenantId: data.tenantId } : {})
+        }
+      });
+
+      if (existingContact) {
+        const newTags = Array.isArray(data.tags) ? data.tags : [];
+        const existingTags = Array.isArray(existingContact.tags) ? existingContact.tags : [];
+        const mergedTags = Array.from(new Set([...existingTags, ...newTags]));
+
+        const currentIsGeneric = !existingContact.nome || existingContact.nome.startsWith('Lead ');
+        const newIsCustom = data.nome && !data.nome.startsWith('Lead ');
+        const finalNome = (currentIsGeneric && newIsCustom) ? data.nome : (data.nome || existingContact.nome);
+
+        const updated = await prisma.contact.update({
+          where: { id: existingContact.id },
+          data: {
+            nome: finalNome,
+            email: data.email !== undefined ? (data.email || null) : existingContact.email,
+            observacoes: data.observacoes !== undefined ? (data.observacoes || null) : existingContact.observacoes,
+            tags: mergedTags,
+            categoriaId: data.categoriaId !== undefined ? (data.categoriaId || null) : existingContact.categoriaId
+          },
+          include: {
+            categoria: true
+          }
+        });
+
+        console.log('?? ContactService.createContact - contato existente atualizado:', updated.id);
+        return updated;
+      }
+
       const newContact = await prisma.contact.create({
         data: {
           nome: data.nome,
@@ -195,7 +253,7 @@ export class ContactService {
         }
       });
 
-      console.log('✅ ContactService.createContact - contato criado:', newContact.id);
+      console.log('? ContactService.createContact - contato criado:', newContact.id);
       return newContact;
     } catch (error) {
       console.error('❌ ContactService.createContact - erro:', error);

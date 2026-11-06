@@ -444,11 +444,13 @@ export function CSVImportModal({ isOpen, onClose, onSuccess }: CSVImportModalPro
 
             {/* Import Instructions */}
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <h3 className="font-medium text-gray-900 text-sm mb-2">ℹ️ Instruções</h3>
-              <ul className="text-xs text-gray-600 space-y-1">
-                <li>• Colunas obrigatórias: <strong>nome</strong> e <strong>telefone</strong></li>
-                <li>• Opcionais: email, observacoes, tags, categoriaId</li>
-                <li>• Se uma categoria for escolhida acima, todos os contatos importados serão adicionados a ela automaticamente</li>
+              <h3 className="font-medium text-gray-900 text-sm mb-2">?? Instru??es de Importa??o</h3>
+              <ul className="text-xs text-gray-600 space-y-1.5">
+                <li>? <strong>Telefone</strong> ? a ?nica informa??o obrigat?ria (voc? pode subir uma planilha com apenas a coluna de telefone).</li>
+                <li>? Se o nome for omitido, ser? gerado automaticamente (ex: Lead +5511...).</li>
+                <li>? Opcionais: email, observa??es, tags, categoria.</li>
+                <li>? Suporta separadores comuns automaticamente: v?rgula (,), ponto e v?rgula (;) ou tabula??o.</li>
+                <li>? Se uma categoria for selecionada acima, todos os contatos ser?o vinculados a ela.</li>
               </ul>
             </div>
 
