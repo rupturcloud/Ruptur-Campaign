@@ -19,8 +19,11 @@ export function encryptUazapiToken(token: string): string {
   const body = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
   return ['v1', iv.toString('base64'), cipher.getAuthTag().toString('base64'), body.toString('base64')].join('.');
 }
-export function decryptUazapiToken(value: string): string {
-  const [version, iv, tag, body] = value.split('.');
+export function decryptUazapiToken(value?: string | null): string {
+  if (!value || typeof value !== 'string') throw new Error('Credencial Uazapi ausente');
+  const parts = value.split('.');
+  if (parts.length !== 4) throw new Error('Formato de credencial Uazapi inválido');
+  const [version, iv, tag, body] = parts;
   if (version !== 'v1' || !iv || !tag || !body) throw new Error('Credencial Uazapi inválida');
   const cipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(iv, 'base64'));
   cipher.setAuthTag(Buffer.from(tag, 'base64'));

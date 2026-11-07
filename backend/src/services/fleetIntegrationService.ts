@@ -81,7 +81,7 @@ class FleetIntegrationService {
           'x-ruptur-bridge-token': token,
           'x-ruptur-actor-role': 'ADMIN',
           'x-ruptur-actor-id': 'campaign-backend',
-          'x-ruptur-tenant-id': tenantId
+          'x-ruptur-tenant-id': 'default'
         },
         signal: AbortSignal.timeout(3000)
       });
@@ -116,7 +116,7 @@ class FleetIntegrationService {
           'x-ruptur-bridge-token': token,
           'x-ruptur-actor-role': 'ADMIN',
           'x-ruptur-actor-id': 'campaign-backend',
-          'x-ruptur-tenant-id': tenantId
+          'x-ruptur-tenant-id': 'default'
         },
         body: JSON.stringify({ action, campaignId, sessionNames, phones }),
         signal: AbortSignal.timeout(3000)

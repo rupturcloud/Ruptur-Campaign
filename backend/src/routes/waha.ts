@@ -118,8 +118,18 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     }
     const uazapiSessions = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI', ...(tenantId ? { tenantId } : {}) } });
     await Promise.all(uazapiSessions.map(async session => {
-      try { await uazapiService.refresh(session); }
-      catch { await prisma.whatsAppSession.update({ where: { id: session.id }, data: { status: 'FAILED' } }); }
+      if (!session.uazapiToken || !session.uazapiHost) return;
+      try {
+        await uazapiService.refresh(session);
+      } catch (err: any) {
+        const isOffline = err?.message?.toLowerCase().includes('disconnected') ||
+                          err?.message?.toLowerCase().includes('offline') ||
+                          err?.message?.toLowerCase().includes('404');
+        await prisma.whatsAppSession.update({
+          where: { id: session.id },
+          data: { status: isOffline ? 'STOPPED' : 'FAILED' }
+        });
+      }
     }));
 
     // Sincronizar apenas sessões WAHA que já existem no banco DESTE tenant
@@ -534,6 +544,9 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
           where: { id: existing.id },
           data: {
             ...statusInfo,
+            tenantId,
+            name: sessionName,
+            displayName,
             uazapiHost: host,
             uazapiToken: encryptUazapiToken(instToken),
             uazapiInstanceId: identity
