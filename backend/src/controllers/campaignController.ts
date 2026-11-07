@@ -435,7 +435,27 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
     if (targetTags !== undefined) updateData.targetTags = JSON.stringify(targetTags);
     if (sessionNames !== undefined) {
       updateData.sessionNames = JSON.stringify(sessionNames);
-      updateData.sessionName = sessionNames[0] || existing.sessionName;
+      let targetSessionName: string | null = (Array.isArray(sessionNames) && sessionNames[0]) || existing.sessionName || null;
+      if (targetSessionName) {
+        const sessionExists = await prisma.whatsAppSession.findUnique({
+          where: { name: targetSessionName },
+          select: { name: true }
+        });
+        if (!sessionExists) {
+          const baseName = targetSessionName.replace(/_[0-9a-f]{8}$/, '');
+          const matched = await prisma.whatsAppSession.findFirst({
+            where: {
+              OR: [
+                { name: { contains: baseName } },
+                { displayName: baseName }
+              ]
+            },
+            select: { name: true }
+          });
+          targetSessionName = matched ? matched.name : null;
+        }
+      }
+      updateData.sessionName = targetSessionName;
     }
     if (messageType !== undefined) updateData.messageType = messageType;
     if (messageContent !== undefined) updateData.messageContent = JSON.stringify(messageContent);
