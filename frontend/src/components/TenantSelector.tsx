@@ -57,12 +57,16 @@ export function TenantSelector() {
         setAllTenants(tenantsArray);
 
         // Load from localStorage or select first
-        const savedTenantId = localStorage.getItem('superadmin_selected_tenant');
+        const savedTenantId = localStorage.getItem('selected_tenant_id') || localStorage.getItem('superadmin_selected_tenant');
         if (savedTenantId && tenantsArray.some((t: SuperAdminTenant) => t.id === savedTenantId)) {
           setSelectedSuperAdminTenant(savedTenantId);
+          localStorage.setItem('superadmin_selected_tenant', savedTenantId);
+          localStorage.setItem('selected_tenant_id', savedTenantId);
         } else if (tenantsArray.length > 0) {
-          setSelectedSuperAdminTenant(tenantsArray[0].id);
-          localStorage.setItem('superadmin_selected_tenant', tenantsArray[0].id);
+          const defaultTenant = tenantsArray.find((t: SuperAdminTenant) => t.slug === 'ruptur' || t.name === 'Ruptur') || tenantsArray[0];
+          setSelectedSuperAdminTenant(defaultTenant.id);
+          localStorage.setItem('superadmin_selected_tenant', defaultTenant.id);
+          localStorage.setItem('selected_tenant_id', defaultTenant.id);
         }
       }
     } catch (error) {
@@ -93,6 +97,7 @@ export function TenantSelector() {
         // Update token with new tenant context
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('superadmin_selected_tenant', tenantId);
+        localStorage.setItem('selected_tenant_id', tenantId);
 
         toast.success('Empresa alterada com sucesso');
 

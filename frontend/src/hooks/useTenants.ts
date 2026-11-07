@@ -73,6 +73,8 @@ export function useTenants() {
       if (data.success) {
         // Update token with new tenant context
         localStorage.setItem('auth_token', data.token);
+        localStorage.setItem('selected_tenant_id', tenantId);
+        localStorage.setItem('superadmin_selected_tenant', tenantId);
         setToken(data.token);
 
         // Update current tenant

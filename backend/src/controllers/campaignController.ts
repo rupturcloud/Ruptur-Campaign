@@ -106,7 +106,24 @@ export const listCampaigns = async (req: AuthenticatedRequest, res: Response) =>
 
     // Filtro por tenant (sempre aplicar quando tenantId existe)
     if (req.tenantId) {
-      where.tenantId = req.tenantId;
+      if (req.user?.role === 'SUPERADMIN') {
+        const countTenant = await prisma.campaign.count({
+          where: {
+            OR: [
+              { tenantId: req.tenantId },
+              { tenantId: null }
+            ]
+          }
+        });
+        if (countTenant > 0) {
+          where.OR = [
+            { tenantId: req.tenantId },
+            { tenantId: null }
+          ];
+        }
+      } else {
+        where.tenantId = req.tenantId;
+      }
     }
 
     // Filtro de busca

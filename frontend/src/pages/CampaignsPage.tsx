@@ -1,3 +1,4 @@
+import { useTenant } from '../contexts/TenantContext';
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { Header } from '../components/Header';
@@ -270,6 +271,7 @@ function numberedSequencePreview(sequence: Array<{ type: string; content: any }>
 }
 
 export function CampaignsPage() {
+  const { selectedTenantId } = useTenant();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -335,12 +337,12 @@ export function CampaignsPage() {
       setShowCreateModal(true);
       toast.success('Lista de grupos carregada e pronta para disparo!');
     }
-  }, []);
+  }, [selectedTenantId]);
 
   // Helper para fazer requisições autenticadas
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('auth_token');
-    const savedTenantId = localStorage.getItem('selected_tenant_id');
+    const savedTenantId = selectedTenantId || localStorage.getItem('selected_tenant_id') || localStorage.getItem('superadmin_selected_tenant');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,

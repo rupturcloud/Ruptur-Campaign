@@ -72,19 +72,23 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         setTenants(tenantsArray);
 
         // Carregar tenant selecionado do localStorage ou selecionar primeiro
-        const savedTenantId = localStorage.getItem('selected_tenant_id');
+        const savedTenantId = localStorage.getItem('selected_tenant_id') || localStorage.getItem('superadmin_selected_tenant');
         if (savedTenantId && tenantsArray.some((t: Tenant) => t.id === savedTenantId)) {
           setSelectedTenantId(savedTenantId);
+          localStorage.setItem('selected_tenant_id', savedTenantId);
+          localStorage.setItem('superadmin_selected_tenant', savedTenantId);
         } else {
-          // TenantId salvo é inválido, limpar e selecionar o primeiro
           if (savedTenantId) {
             console.warn('TenantId salvo no localStorage é inválido, limpando:', savedTenantId);
             localStorage.removeItem('selected_tenant_id');
+            localStorage.removeItem('superadmin_selected_tenant');
           }
 
           if (tenantsArray.length > 0) {
-            setSelectedTenantId(tenantsArray[0].id);
-            localStorage.setItem('selected_tenant_id', tenantsArray[0].id);
+            const defaultTenant = tenantsArray.find((t: Tenant) => t.slug === 'ruptur' || t.name === 'Ruptur') || tenantsArray[0];
+            setSelectedTenantId(defaultTenant.id);
+            localStorage.setItem('selected_tenant_id', defaultTenant.id);
+            localStorage.setItem('superadmin_selected_tenant', defaultTenant.id);
           }
         }
       }
@@ -109,6 +113,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (selectedTenantId) {
       localStorage.setItem('selected_tenant_id', selectedTenantId);
+      localStorage.setItem('superadmin_selected_tenant', selectedTenantId);
     }
   }, [selectedTenantId]);
 

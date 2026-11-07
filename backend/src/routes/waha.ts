@@ -540,13 +540,10 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
 
     if (existing) {
       try {
-        const preserveMasterTenant = existing.tenantId === '69bc1a56-27c8-4173-9aac-c7aba751b8bb';
         await prisma.whatsAppSession.update({
           where: { id: existing.id },
           data: {
             ...statusInfo,
-            tenantId: preserveMasterTenant ? existing.tenantId : tenantId,
-            name: preserveMasterTenant ? existing.name : sessionName,
             displayName,
             uazapiHost: host,
             uazapiToken: encryptUazapiToken(instToken),
