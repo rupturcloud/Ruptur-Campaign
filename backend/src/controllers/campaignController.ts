@@ -988,43 +988,113 @@ export const getContactTags = async (req: AuthenticatedRequest, res: Response) =
 // Get active WhatsApp sessions
 export const getActiveSessions = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Fast status sync from UAZAPI /instance/all so newly connected instances on UAZAPI appear immediately in Campaigns
+    // Auto-import & sync all UAZAPI instances so any instance available on UAZAPI is immediately ready without manual QR/linking
     try {
+      const crypto = await import('crypto');
+      const { encryptUazapiToken, normalizeUazapiHost } = await import('../services/uazapiClient');
       const tsList = await prisma.tenantSettings.findMany({
-        where: { uazapiAdminToken: { not: null } },
-        take: 1
+        where: { uazapiAdminToken: { not: null } }
       });
-      const adminToken = tsList[0]?.uazapiAdminToken || process.env.UAZAPI_ADMIN_TOKEN;
-      const uazapiUrl = (tsList[0]?.uazapiUrl || 'https://ruptur001.uazapi.com').replace(/\/+$/, '');
-      if (adminToken) {
-        const uRes = await fetch(`${uazapiUrl}/instance/all`, {
-          headers: { admintoken: adminToken },
-          signal: AbortSignal.timeout(4000)
-        });
-        if (uRes.ok) {
-          const uData: any = await uRes.json();
-          const uInstances: any[] = Array.isArray(uData) ? uData : (uData.instances || uData.data || []);
-          if (uInstances.length > 0) {
-            const dbUazapi = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI' } });
-            await Promise.all(uInstances.map(async (inst: any) => {
-              const instName = String(inst.name || '').trim();
-              if (!instName) return;
-              const targetStatus = inst.status === 'connected' ? 'WORKING' : 'STOPPED';
-              const match = dbUazapi.find(s => s.displayName === instName || s.name.startsWith(`${instName}_`) || s.name === instName);
-              if (match && match.status !== targetStatus) {
-                await prisma.whatsAppSession.update({
-                  where: { id: match.id },
-                  data: {
-                    status: targetStatus,
-                    mePushName: inst.profileName || match.mePushName,
-                    meId: inst.owner || inst.phone || match.meId,
-                    profilePicUrl: inst.profilePicUrl || (match as any).profilePicUrl
-                  }
-                });
-              }
-            }));
-          }
+      const servers = new Map<string, { url: string; token: string; tenantId: string }>();
+      for (const ts of tsList) {
+        if (ts.uazapiAdminToken?.trim()) {
+          const url = normalizeUazapiHost(ts.uazapiUrl || 'https://ruptur001.uazapi.com');
+          servers.set(`${url}|${ts.uazapiAdminToken.trim()}`, {
+            url,
+            token: ts.uazapiAdminToken.trim(),
+            tenantId: ts.tenantId
+          });
         }
+      }
+      if (servers.size === 0 && process.env.UAZAPI_ADMIN_TOKEN) {
+        const url = normalizeUazapiHost(process.env.DEFAULT_UAZAPI_HOST || 'https://ruptur001.uazapi.com');
+        servers.set(`${url}|${process.env.UAZAPI_ADMIN_TOKEN}`, {
+          url,
+          token: process.env.UAZAPI_ADMIN_TOKEN,
+          tenantId: req.tenantId || '69bc1a56-27c8-4173-9aac-c7aba751b8bb'
+        });
+      }
+
+      for (const srv of servers.values()) {
+        const uRes = await fetch(`${srv.url}/instance/all`, {
+          headers: { admintoken: srv.token },
+          signal: AbortSignal.timeout(5000)
+        });
+        if (!uRes.ok) continue;
+        const uData: any = await uRes.json();
+        const uInstances: any[] = Array.isArray(uData) ? uData : (uData.instances || uData.data || []);
+        if (uInstances.length === 0) continue;
+
+        const dbUazapi = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI' } });
+        const defaultTenantId = req.tenantId || srv.tenantId || '69bc1a56-27c8-4173-9aac-c7aba751b8bb';
+        const tenantPrefix = defaultTenantId.substring(0, 8);
+
+        await Promise.all(uInstances.map(async (inst: any) => {
+          const instId = String(inst.id || inst.instanceId || inst.name || '').trim();
+          const instName = String(inst.name || inst.instanceName || instId || '').trim();
+          const instToken = String(inst.token || inst.apiToken || inst.apikey || '').trim();
+          if (!instId || !instName || !instToken) return;
+
+          const identity = crypto.createHash('sha256').update(`${srv.url}:${instId}`).digest('hex');
+          const displayName = instName.replace(/_[0-9a-f]{8}$/, '');
+          const targetStatus = inst.status === 'connected' ? 'WORKING' : 'STOPPED';
+          const ownerPhone = inst.owner || inst.phone || null;
+          const profileName = inst.profileName || instName || null;
+          const profilePicUrl = inst.profilePicUrl || null;
+
+          const match = dbUazapi.find(s =>
+            s.uazapiInstanceId === identity ||
+            s.displayName === displayName ||
+            s.name === instName ||
+            s.name.startsWith(`${displayName}_`)
+          );
+
+          if (match) {
+            if (
+              match.status !== targetStatus ||
+              match.meId !== ownerPhone ||
+              match.mePushName !== profileName ||
+              !match.uazapiToken
+            ) {
+              await prisma.whatsAppSession.update({
+                where: { id: match.id },
+                data: {
+                  status: targetStatus,
+                  uazapiHost: srv.url,
+                  uazapiToken: encryptUazapiToken(instToken),
+                  uazapiInstanceId: identity,
+                  mePushName: profileName || match.mePushName,
+                  meId: ownerPhone || match.meId,
+                  meJid: ownerPhone || match.meJid,
+                  ...(profilePicUrl ? { profilePicUrl } : {})
+                }
+              });
+            }
+          } else {
+            const sessionName = instName.includes(`_${tenantPrefix}`) ? instName : `${displayName}_${tenantPrefix}`;
+            try {
+              await prisma.whatsAppSession.create({
+                data: {
+                  name: sessionName,
+                  displayName,
+                  tenantId: defaultTenantId,
+                  provider: 'UAZAPI',
+                  status: targetStatus,
+                  uazapiHost: srv.url,
+                  uazapiToken: encryptUazapiToken(instToken),
+                  uazapiInstanceId: identity,
+                  meId: ownerPhone,
+                  meJid: ownerPhone,
+                  mePushName: profileName,
+                  ...(profilePicUrl ? { profilePicUrl } : {}),
+                  interactiveCampaignEnabled: false
+                }
+              });
+            } catch {
+              // Ignore duplicate race condition
+            }
+          }
+        }));
       }
     } catch {
       // Non-blocking sync
@@ -1035,8 +1105,9 @@ export const getActiveSessions = async (req: AuthenticatedRequest, res: Response
       status: 'WORKING'
     };
 
-    // Filtrar por tenant com fallback para a frota ativa
-    if (req.tenantId) {
+    // Para SUPERADMIN: disponibilizar TODAS as instâncias conectadas de qualquer tenant (sustentação/teste/frota completa).
+    // Para usuários de tenant comum: filtrar por tenant (com fallback caso não tenha sessão própria).
+    if (req.user?.role !== 'SUPERADMIN' && req.tenantId) {
       const count = await prisma.whatsAppSession.count({
         where: { status: 'WORKING', tenantId: req.tenantId }
       });

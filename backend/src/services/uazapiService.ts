@@ -17,7 +17,21 @@ export const uazapiService = {
     return new UazapiClient(session.uazapiHost, decryptUazapiToken(session.uazapiToken));
   },
   async session(name: string, tenantId?: string) {
-    const session = await prisma.whatsAppSession.findFirst({ where: { name, provider: 'UAZAPI', ...(tenantId ? { tenantId } : {}) } });
+    let session = await prisma.whatsAppSession.findFirst({ where: { name, provider: 'UAZAPI', ...(tenantId ? { tenantId } : {}) } });
+    if (!session) {
+      const cleanName = name.replace(/_[0-9a-f]{8}$/, '');
+      session = await prisma.whatsAppSession.findFirst({
+        where: {
+          provider: 'UAZAPI',
+          OR: [
+            { name },
+            { displayName: name },
+            { displayName: cleanName },
+            { name: { startsWith: `${cleanName}_` } }
+          ]
+        }
+      });
+    }
     if (!session) throw new Error('Conexão Uazapi não encontrada');
     return session;
   },

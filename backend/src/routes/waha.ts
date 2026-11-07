@@ -412,8 +412,9 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
       console.warn('⚠️ Erro ao sincronizar Evolution, mas continuando com dados do banco:', evolutionError);
     }
 
-    // Retornar todas as sessões atualizadas do banco
-    const updatedSessions = await WhatsAppSessionService.getAllSessions(tenantId);
+    // Retornar todas as sessões atualizadas do banco (SUPERADMIN enxerga toda a frota de qualquer tenant)
+    const effectiveFilterTenantId = req.user?.role === 'SUPERADMIN' ? undefined : tenantId;
+    const updatedSessions = await WhatsAppSessionService.getAllSessions(effectiveFilterTenantId);
     res.json(updatedSessions);
   } catch (error) {
     console.error('Erro ao listar sessões:', error);
