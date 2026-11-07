@@ -63,7 +63,7 @@ function orderContactsByTagPriority(
 async function reprioritizePendingMessages(campaignId: string, targetTags: string[], tenantId?: string) {
   for (let idx = 0; idx < targetTags.length; idx++) {
     const contacts = await prisma.contact.findMany({
-      where: { categoriaId: targetTags[idx], ...(tenantId ? { tenantId } : {}) },
+      where: { categoriaId: targetTags[idx] },
       select: { id: true }
     });
     const ids = contacts.map(c => c.id);
@@ -150,6 +150,10 @@ export const listCampaigns = async (req: AuthenticatedRequest, res: Response) =>
               provider: true
             }
           },
+          messages: {
+            where: { contactId: null },
+            select: { contactPhone: true }
+          },
           _count: {
             select: {
               messages: true
@@ -166,13 +170,20 @@ export const listCampaigns = async (req: AuthenticatedRequest, res: Response) =>
     ]);
 
     // Parse JSON fields
-    const campaignsWithParsedData = campaigns.map(campaign => ({
-      ...campaign,
-      manualPhones: ((campaign as any).manualPhones || '').replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n'),
-      targetTags: JSON.parse(campaign.targetTags),
-      sessionNames: campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [],
-      messageContent: JSON.parse(campaign.messageContent)
-    }));
+    const campaignsWithParsedData = campaigns.map(campaign => {
+      let resolvedManualPhones = ((campaign as any).manualPhones || '').replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n').trim();
+      if (!resolvedManualPhones && Array.isArray((campaign as any).messages) && (campaign as any).messages.length > 0) {
+        resolvedManualPhones = (campaign as any).messages.map((m: any) => m.contactPhone).join('\n');
+      }
+      const { messages: _manualMessages, ...campaignRest } = campaign as any;
+      return {
+        ...campaignRest,
+        manualPhones: resolvedManualPhones,
+        targetTags: JSON.parse(campaign.targetTags),
+        sessionNames: campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [],
+        messageContent: JSON.parse(campaign.messageContent)
+      };
+    });
 
     res.json({
       campaigns: campaignsWithParsedData,
@@ -330,10 +341,9 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
     let campaignContacts: Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }> = [];
 
     if (!isDraft || (targetTags && targetTags.length > 0) || (parsedManualPhones && parsedManualPhones.length > 0)) {
-      // Buscar contatos que pertencem às categorias selecionadas
+      // Buscar contatos que pertencem às categorias selecionadas (categoriaId já é UUID único da lista)
       const whereContacts: any = {
-        categoriaId: { in: targetTags },
-        tenantId: tenantId
+        categoriaId: { in: targetTags }
       };
 
       const filteredContacts = await prisma.contact.findMany({
@@ -349,7 +359,9 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
       console.log(`📊 Categorias selecionadas:`, targetTags);
       const manualContacts = [] as Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }>;
       for (const phone of parsedManualPhones || []) {
-        const existing = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
+        const existing = await prisma.contact.findFirst({
+          where: tenantId ? { OR: [{ tenantId, telefone: phone }, { telefone: phone }] } : { telefone: phone }
+        });
         manualContacts.push(existing ? existing : { id: null, nome: `Lead ${phone}`, telefone: phone, categoriaId: null });
       }
       // Ordenar pela prioridade das listas (ordem do array targetTags) e deduplicar mantendo a maior prioridade
@@ -514,70 +526,135 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
       }
     }
 
-    // Se informou novos telefones manuais ou alterou tags, sincronizar contatos
-    const hasNewManualPhones = typeof manualPhones === 'string' && manualPhones.trim().length > 0;
-    const hasTagsChange = targetTags !== undefined && Array.isArray(targetTags) && JSON.stringify(targetTags) !== existing.targetTags;
+    // Sincronizar lista de envios sempre que targetTags ou manualPhones forem enviados na edição
+    if (targetTags !== undefined || manualPhones !== undefined) {
+      const tenantId = req.tenantId || existing.tenantId;
+      let rawManual = manualPhones !== undefined ? manualPhones : (existing.manualPhones || '');
 
-    if (hasNewManualPhones || (hasTagsChange && targetTags.length > 0)) {
-      const tenantId = req.tenantId;
+      // Se manualPhones veio vazio mas o registro antigo estava com manualPhones=null e tinha mensagens manuais salvas, recuperar
+      if (!rawManual && !existing.manualPhones && manualPhones === undefined) {
+        const oldManualMsgs = await prisma.campaignMessage.findMany({
+          where: { campaignId: id, contactId: null },
+          select: { contactPhone: true }
+        });
+        if (oldManualMsgs.length > 0) {
+          rawManual = oldManualMsgs.map(m => m.contactPhone).join('\n');
+          updateData.manualPhones = rawManual;
+        }
+      }
+
       let parsedManualPhones: string[] = [];
-      if (hasNewManualPhones) {
+      if (typeof rawManual === 'string' && rawManual.trim().length > 0) {
         try {
-          parsedManualPhones = parseManualPhones(manualPhones);
+          parsedManualPhones = parseManualPhones(rawManual);
         } catch (error) {
           return res.status(400).json({ error: error instanceof Error ? error.message : 'Números manuais inválidos' });
         }
       }
 
-      const activeTags = targetTags !== undefined ? targetTags : JSON.parse(existing.targetTags || '[]');
+      const activeTags: string[] = Array.isArray(targetTags)
+        ? targetTags
+        : JSON.parse(existing.targetTags || '[]');
+
       const filteredContacts = activeTags.length > 0
         ? await prisma.contact.findMany({
-            where: { categoriaId: { in: activeTags }, tenantId },
+            where: { categoriaId: { in: activeTags } },
             select: { id: true, nome: true, telefone: true, categoriaId: true }
           })
         : [];
 
       const manualContacts = [] as Array<{ id: string | null; nome: string; telefone: string; categoriaId: string | null }>;
       for (const phone of parsedManualPhones) {
-        const found = await prisma.contact.findFirst({ where: { tenantId, telefone: phone } });
+        const found = await prisma.contact.findFirst({
+          where: tenantId ? { OR: [{ tenantId, telefone: phone }, { telefone: phone }] } : { telefone: phone }
+        });
         manualContacts.push(found ? found : { id: null, nome: `Lead ${phone}`, telefone: phone, categoriaId: null });
       }
 
       const newContacts = orderContactsByTagPriority(filteredContacts, manualContacts, activeTags);
 
       if (newContacts.length > 0) {
-        await prisma.campaignMessage.deleteMany({ where: { campaignId: id } });
-        const newMessages = newContacts.map((contact: any) => ({
-          campaignId: id,
-          contactId: contact.id,
-          contactPhone: contact.telefone,
-          contactName: contact.nome,
-          tenantId: existing.tenantId,
-          priority: contact.priority ?? 0
-        }));
-        await prisma.campaignMessage.createMany({ data: newMessages });
-        updateData.totalContacts = newContacts.length;
-        updateData.sentCount = 0;
-        updateData.failedCount = 0;
-        updateData.completedAt = null;
-      }
-    }
+        const willRestartCompleted =
+          existing.status === 'COMPLETED' &&
+          (startImmediately === true || status === 'RUNNING' || sendMode === 'immediate');
 
-    // Se apenas a ordem das listas mudou (mesmas categorias), repriorizar mensagens pendentes sem recriar
-    if (
-      !hasNewManualPhones &&
-      Array.isArray(targetTags) &&
-      targetTags.length > 0 &&
-      hasTagsChange
-    ) {
-      try {
-        const previousTags: string[] = JSON.parse(existing.targetTags || '[]');
-        const sameSet = previousTags.length === targetTags.length && previousTags.every((t: string) => targetTags.includes(t));
-        if (sameSet) {
-          await reprioritizePendingMessages(id, targetTags, req.tenantId);
+        if (willRestartCompleted) {
+          await prisma.campaignMessage.deleteMany({ where: { campaignId: id } });
+          const newMessages = newContacts.map((contact: any) => ({
+            campaignId: id,
+            contactId: contact.id,
+            contactPhone: contact.telefone,
+            contactName: contact.nome,
+            tenantId: existing.tenantId,
+            priority: contact.priority ?? 0,
+            status: 'PENDING'
+          }));
+          await prisma.campaignMessage.createMany({ data: newMessages });
+          updateData.totalContacts = newContacts.length;
+          updateData.sentCount = 0;
+          updateData.failedCount = 0;
+          updateData.completedAt = null;
+        } else {
+          // Preservar envios já concluídos (SENT) que continuam na seleção e atualizar todos os pendentes/novos
+          const newPhonesSet = new Set(newContacts.map(c => c.telefone));
+          const existingSent = await prisma.campaignMessage.findMany({
+            where: { campaignId: id, status: 'SENT' },
+            select: { id: true, contactPhone: true }
+          });
+
+          const keptSentPhones = new Set<string>();
+          const duplicateOrRemovedSentIds: string[] = [];
+          for (const msg of existingSent) {
+            if (newPhonesSet.has(msg.contactPhone) && !keptSentPhones.has(msg.contactPhone)) {
+              keptSentPhones.add(msg.contactPhone);
+            } else {
+              duplicateOrRemovedSentIds.push(msg.id);
+            }
+          }
+
+          await prisma.campaignMessage.deleteMany({
+            where: {
+              campaignId: id,
+              OR: [
+                { status: { not: 'SENT' } },
+                ...(duplicateOrRemovedSentIds.length > 0 ? [{ id: { in: duplicateOrRemovedSentIds } }] : [])
+              ]
+            }
+          });
+
+          const contactsToInsert = newContacts.filter(c => !keptSentPhones.has(c.telefone));
+          if (contactsToInsert.length > 0) {
+            await prisma.campaignMessage.createMany({
+              data: contactsToInsert.map((contact: any) => ({
+                campaignId: id,
+                contactId: contact.id,
+                contactPhone: contact.telefone,
+                contactName: contact.nome,
+                tenantId: existing.tenantId,
+                priority: contact.priority ?? 0,
+                status: 'PENDING'
+              }))
+            });
+          }
+
+          // Atualizar prioridade de todas as mensagens conforme a nova ordem das listas
+          for (const contact of newContacts) {
+            if (keptSentPhones.has(contact.telefone)) {
+              await prisma.campaignMessage.updateMany({
+                where: { campaignId: id, contactPhone: contact.telefone, status: 'SENT' },
+                data: { priority: contact.priority ?? 0, contactId: contact.id, contactName: contact.nome }
+              });
+            }
+          }
+
+          updateData.totalContacts = keptSentPhones.size + contactsToInsert.length;
+          updateData.sentCount = keptSentPhones.size;
+          updateData.failedCount = 0;
+          if (contactsToInsert.length > 0 && existing.status === 'COMPLETED' && !updateData.status) {
+            updateData.status = 'PAUSED';
+            updateData.completedAt = null;
+          }
         }
-      } catch (reorderError) {
-        console.warn('⚠️ Falha ao repriorizar mensagens pendentes:', reorderError);
       }
     }
 
@@ -652,6 +729,7 @@ export const duplicateCampaign = async (req: AuthenticatedRequest, res: Response
         targetTags: existing.targetTags || '[]',
         sessionNames: existing.sessionNames || '[]',
         sessionName: resolvedSessionName,
+        manualPhones: (existing as any).manualPhones || null,
         messageType: existing.messageType || 'text',
         messageContent: existing.messageContent || JSON.stringify({ text: '' }),
         randomDelay: existing.randomDelay || 30,
@@ -962,8 +1040,9 @@ export const getCampaignReport = async (req: AuthenticatedRequest, res: Response
 export const getContactTags = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.tenantId;
+    const isSuperAdmin = req.user?.role === 'SUPERADMIN';
     const categories = await prisma.category.findMany({
-      where: tenantId ? { tenantId } : {},
+      where: (!isSuperAdmin && tenantId) ? { tenantId } : {},
       include: {
         _count: {
           select: { contacts: true }
