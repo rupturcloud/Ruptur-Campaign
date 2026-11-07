@@ -988,6 +988,48 @@ export const getContactTags = async (req: AuthenticatedRequest, res: Response) =
 // Get active WhatsApp sessions
 export const getActiveSessions = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // Fast status sync from UAZAPI /instance/all so newly connected instances on UAZAPI appear immediately in Campaigns
+    try {
+      const tsList = await prisma.tenantSettings.findMany({
+        where: { uazapiAdminToken: { not: null } },
+        take: 1
+      });
+      const adminToken = tsList[0]?.uazapiAdminToken || process.env.UAZAPI_ADMIN_TOKEN;
+      const uazapiUrl = (tsList[0]?.uazapiUrl || 'https://ruptur001.uazapi.com').replace(/\/+$/, '');
+      if (adminToken) {
+        const uRes = await fetch(`${uazapiUrl}/instance/all`, {
+          headers: { admintoken: adminToken },
+          signal: AbortSignal.timeout(4000)
+        });
+        if (uRes.ok) {
+          const uData: any = await uRes.json();
+          const uInstances: any[] = Array.isArray(uData) ? uData : (uData.instances || uData.data || []);
+          if (uInstances.length > 0) {
+            const dbUazapi = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI' } });
+            await Promise.all(uInstances.map(async (inst: any) => {
+              const instName = String(inst.name || '').trim();
+              if (!instName) return;
+              const targetStatus = inst.status === 'connected' ? 'WORKING' : 'STOPPED';
+              const match = dbUazapi.find(s => s.displayName === instName || s.name.startsWith(`${instName}_`) || s.name === instName);
+              if (match && match.status !== targetStatus) {
+                await prisma.whatsAppSession.update({
+                  where: { id: match.id },
+                  data: {
+                    status: targetStatus,
+                    mePushName: inst.profileName || match.mePushName,
+                    meId: inst.owner || inst.phone || match.meId,
+                    profilePicUrl: inst.profilePicUrl || (match as any).profilePicUrl
+                  }
+                });
+              }
+            }));
+          }
+        }
+      }
+    } catch {
+      // Non-blocking sync
+    }
+
     // Filtro base
     const where: any = {
       status: 'WORKING'
