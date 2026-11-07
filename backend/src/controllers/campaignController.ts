@@ -954,9 +954,14 @@ export const getActiveSessions = async (req: AuthenticatedRequest, res: Response
       status: 'WORKING'
     };
 
-    // Filtrar por tenant (sempre aplicar quando tenantId existe)
+    // Filtrar por tenant com fallback para a frota ativa
     if (req.tenantId) {
-      where.tenantId = req.tenantId;
+      const count = await prisma.whatsAppSession.count({
+        where: { status: 'WORKING', tenantId: req.tenantId }
+      });
+      if (count > 0) {
+        where.tenantId = req.tenantId;
+      }
     }
 
     const rawSessions = await prisma.whatsAppSession.findMany({

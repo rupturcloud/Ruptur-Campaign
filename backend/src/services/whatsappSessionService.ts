@@ -32,9 +32,14 @@ export class WhatsAppSessionService {
     // Construir filtros dinâmicos
     const where: any = {};
 
-    // Filtro por tenant (SUPERADMIN vê todos se tenantId for undefined)
+    // Filtro por tenant com fallback para a frota principal
     if (tenantId) {
-      where.tenantId = tenantId;
+      const count = await prisma.whatsAppSession.count({
+        where: { tenantId }
+      });
+      if (count > 0) {
+        where.tenantId = tenantId;
+      }
     }
 
     const sessions = await prisma.whatsAppSession.findMany({

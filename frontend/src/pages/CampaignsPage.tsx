@@ -340,6 +340,7 @@ export function CampaignsPage() {
   // Helper para fazer requisições autenticadas
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('auth_token');
+    const savedTenantId = localStorage.getItem('selected_tenant_id');
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -347,6 +348,10 @@ export function CampaignsPage() {
 
     if (token) {
       (headers as Record<string, string>).Authorization = `Bearer ${token}`;
+    }
+
+    if (savedTenantId) {
+      (headers as Record<string, string>)['X-Tenant-Id'] = savedTenantId;
     }
 
     return fetch(url, {
