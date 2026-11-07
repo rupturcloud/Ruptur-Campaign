@@ -158,6 +158,30 @@ class CampaignSchedulerService {
         }
       });
 
+      // Fallback para nomes legados (ex.: uazapi1980_69bc1a56 -> 1980_69bc1a56)
+      if (activeSessions.length < sessionNames.length) {
+        const matchedNames = new Set(activeSessions.map(s => s.name));
+        for (const rawName of sessionNames) {
+          if (matchedNames.has(rawName)) continue;
+          const base = String(rawName || '').replace(/^uazapi/i, '').replace(/_[0-9a-f]{8}$/i, '');
+          if (!base) continue;
+          const fallbackSession = await prisma.whatsAppSession.findFirst({
+            where: {
+              status: 'WORKING',
+              OR: [
+                { name: { contains: base } },
+                { displayName: base }
+              ]
+            },
+            select: { name: true, status: true, provider: true }
+          });
+          if (fallbackSession && !matchedNames.has(fallbackSession.name)) {
+            activeSessions.push(fallbackSession);
+            matchedNames.add(fallbackSession.name);
+          }
+        }
+      }
+
       if (activeSessions.length === 0) {
         console.log(`❌ Nenhuma sessão ativa encontrada das selecionadas: ${sessionNames.join(', ')}`);
         return null;
@@ -303,11 +327,18 @@ class CampaignSchedulerService {
       const contentWithSelectedVariation = variationResult.processedContent;
       selectedVariationInfo = variationResult.variationInfo;
 
-      // VERIFICAR SE ESTE CONTACTID JÁ FOI PROCESSADO NESTA CAMPANHA
+      // VERIFICAR SE ESTE CONTATO/TELEFONE JÁ FOI PROCESSADO NESTA CAMPANHA (normalizando dígitos)
+      const rawDigits = String(message.contactPhone || '').replace(/\D/g, '');
+      const phoneVariants = rawDigits
+        ? Array.from(new Set([message.contactPhone, rawDigits, `+${rawDigits}`]))
+        : [message.contactPhone];
       const alreadyProcessed = await prisma.campaignMessage.findFirst({
         where: {
           campaignId: campaign.id,
-          ...(message.contactId ? { contactId: message.contactId } : { contactPhone: message.contactPhone }),
+          OR: [
+            ...(message.contactId ? [{ contactId: message.contactId }] : []),
+            { contactPhone: { in: phoneVariants } }
+          ],
           status: 'SENT'
         }
       });
@@ -484,12 +515,13 @@ class CampaignSchedulerService {
         sessionBreaker.recordSuccess(selectedSession);
         retryBudget.clear(message.id);
 
-        // Atualizar status da mensagem
+        // Atualizar status da mensagem e limpar qualquer erro transitório anterior
         await prisma.campaignMessage.update({
           where: { id: message.id },
           data: {
             status: 'SENT',
             sentAt: new Date(),
+            errorMessage: null,
             messageId: result.messageId,
             sessionName: selectedSession, // Registrar qual sessão foi usada
             selectedVariation: selectedVariationInfo // Registrar qual variação foi selecionada

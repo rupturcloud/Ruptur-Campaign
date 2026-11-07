@@ -492,7 +492,7 @@ export function CampaignsPage() {
     }));
   };
 
-  const handleCreateCampaign = async (e: React.FormEvent) => {
+  const handleCreateCampaign = async (e: React.FormEvent, resetFromScratch = false) => {
     e.preventDefault();
 
     if (formData.sendMode !== 'draft' && !editingCampaignId && formData.targetTags.length === 0 && !formData.manualPhones.trim()) {
@@ -559,11 +559,12 @@ export function CampaignsPage() {
 
       const campaignData = {
         ...formData,
-        status: finalStatus,
-        startImmediately,
-        scheduledFor: scheduledForISO,
+        status: resetFromScratch ? 'RUNNING' : finalStatus,
+        startImmediately: resetFromScratch ? true : startImmediately,
+        scheduledFor: resetFromScratch ? null : scheduledForISO,
         messageType: finalMessageType,
-        messageContent: finalMessageContent
+        messageContent: finalMessageContent,
+        ...(resetFromScratch ? { resetFromScratch: true, sendMode: 'immediate' } : {})
       };
 
       const response = await authenticatedFetch(editingCampaignId ? `/api/campaigns/${editingCampaignId}` : '/api/campaigns', {
@@ -583,7 +584,13 @@ export function CampaignsPage() {
         }
       }
 
-      toast.success(editingCampaignId ? 'Campanha atualizada com sucesso!' : 'Campanha criada com sucesso!');
+      toast.success(
+        resetFromScratch
+          ? 'Campanha salva e iniciada do zero com sucesso!'
+          : editingCampaignId
+            ? 'Campanha atualizada com sucesso!'
+            : 'Campanha criada com sucesso!'
+      );
       setShowCreateModal(false);
       setEditingCampaignId(null);
       resetForm();
@@ -863,7 +870,14 @@ export function CampaignsPage() {
     return '📄';
   };
 
-  const handleToggleCampaign = async (campaignId: string, action: 'pause' | 'resume') => {
+  const handleToggleCampaign = async (campaignId: string, action: 'pause' | 'resume' | 'restart') => {
+    if (action === 'restart') {
+      const confirmed = window.confirm(
+        'Deseja iniciar os disparos desta campanha DO ZERO?\n\nTodos os contatos selecionados (manuais + listas) serão sincronizados, reenfileirados e enviados desde o início.'
+      );
+      if (!confirmed) return;
+    }
+
     try {
       const response = await authenticatedFetch(`/api/campaigns/${campaignId}/toggle`, {
         method: 'PATCH',
@@ -871,14 +885,21 @@ export function CampaignsPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${response.status}`);
       }
 
-      toast.success(`Campanha ${action === 'pause' ? 'pausada' : 'retomada'} com sucesso!`);
+      const successMessage =
+        action === 'pause'
+          ? 'Campanha pausada com sucesso!'
+          : action === 'restart'
+            ? 'Campanha iniciada do zero com sucesso!'
+            : 'Campanha retomada com sucesso!';
+      toast.success(successMessage);
       loadCampaigns();
     } catch (error) {
       console.error('Erro ao alterar status da campanha:', error);
-      toast.error('Erro ao alterar status da campanha');
+      toast.error(error instanceof Error ? error.message : 'Erro ao alterar status da campanha');
     }
   };
 
@@ -1497,11 +1518,23 @@ export function CampaignsPage() {
                         <button
                           onClick={() => handleToggleCampaign(campaign.id, 'resume')}
                           className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                          title="Retomar campanha"
+                          title="Retomar campanha de onde parou"
                         >
                           <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
                           </svg>
+                        </button>
+                      )}
+                      {campaign.status !== 'RUNNING' && (
+                        <button
+                          onClick={() => handleToggleCampaign(campaign.id, 'restart')}
+                          className="px-2 py-1 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded flex items-center gap-1 shadow-sm font-medium transition"
+                          title="Iniciar disparos do zero (reenfileirar todas as listas e contatos manuais desde o início)"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          <span className="hidden md:inline">Iniciar do Zero</span>
                         </button>
                       )}
                       {campaign.status !== 'RUNNING' && (
@@ -3521,7 +3554,7 @@ export function CampaignsPage() {
                   </aside>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-8 border-t border-gray-200">
+                <div className={`grid grid-cols-1 ${editingCampaignId ? 'lg:grid-cols-3' : 'lg:grid-cols-2'} gap-4 pt-8 border-t border-gray-200`}>
                   <button
                     type="button"
                     onClick={() => { setShowCreateModal(false); setEditingCampaignId(null); resetForm(); }}
@@ -3537,8 +3570,18 @@ export function CampaignsPage() {
                       ? (editingCampaignId ? 'Salvar Rascunho' : 'Salvar como Rascunho')
                       : formData.sendMode === 'scheduled'
                         ? (editingCampaignId ? 'Salvar Agendamento' : 'Agendar Campanha')
-                        : (editingCampaignId ? 'Salvar e Iniciar' : 'Criar Campanha')}
+                        : (editingCampaignId ? 'Salvar e Retomar' : 'Criar Campanha')}
                   </button>
+                  {editingCampaignId && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleCreateCampaign(e as unknown as React.FormEvent, true)}
+                      className="w-full px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-600 text-white rounded-lg hover:from-orange-600 hover:to-amber-700 transition-all font-medium shadow-lg flex items-center justify-center gap-2"
+                      title="Salva todas as alterações e reinicia o envio de todos os contatos (manuais + listas) desde o início"
+                    >
+                      🔄 Salvar e Iniciar do Zero
+                    </button>
+                  )}
                 </div>
               </form>
             </div>
