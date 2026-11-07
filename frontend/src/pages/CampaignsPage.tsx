@@ -628,7 +628,7 @@ export function CampaignsPage() {
     setFormData({
       nome: campaign.nome,
       targetTags: campaign.targetTags || [],
-      manualPhones: campaign.manualPhones || '',
+      manualPhones: (campaign.manualPhones || '').replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n'),
       sessionNames: campaign.sessionNames || [],
       sessionName: campaign.sessionName || '',
       messageType: 'sequence',
@@ -659,7 +659,7 @@ export function CampaignsPage() {
           body: JSON.stringify({
             nome: duplicatedName,
             targetTags: campaign.targetTags || [],
-            manualPhones: campaign.manualPhones || '',
+            manualPhones: (campaign.manualPhones || '').replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n'),
             sessionNames: campaign.sessionNames || [],
             sessionName: campaign.sessionName || '',
             messageType: sequence.length > 1 ? 'sequence' : (sequence[0]?.type || campaign.messageType || 'text'),

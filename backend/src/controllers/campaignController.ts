@@ -12,10 +12,12 @@ const prisma = new PrismaClient();
 
 function parseManualPhones(value: unknown): string[] {
   if (typeof value !== 'string') return [];
-  const tokens = value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean);
+  const normalized = value.replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n');
+  const tokens = normalized.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean);
   const phones: string[] = [];
   for (const token of tokens) {
     const phone = token.replace(/\D/g, '');
+    if (!phone) continue;
     if (phone.length < 8 || phone.length > 15) {
       throw new Error(`Número inválido: ${token}. Use DDI e somente números, por exemplo 5511999999999.`);
     }
@@ -149,7 +151,7 @@ export const listCampaigns = async (req: AuthenticatedRequest, res: Response) =>
     // Parse JSON fields
     const campaignsWithParsedData = campaigns.map(campaign => ({
       ...campaign,
-      manualPhones: (campaign as any).manualPhones || '',
+      manualPhones: ((campaign as any).manualPhones || '').replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n'),
       targetTags: JSON.parse(campaign.targetTags),
       sessionNames: campaign.sessionNames ? JSON.parse(campaign.sessionNames) : [],
       messageContent: JSON.parse(campaign.messageContent)
@@ -202,7 +204,7 @@ export const getCampaign = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(404).json({ error: 'Campanha não encontrada' });
     }
 
-    let resolvedManualPhones = (campaign as any).manualPhones || '';
+    let resolvedManualPhones = ((campaign as any).manualPhones || '').replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n');
     if (!resolvedManualPhones && (campaign as any).messages) {
       const manualMessages = (campaign as any).messages.filter((m: any) => m.contactId === null);
       if (manualMessages.length > 0) {
@@ -356,7 +358,7 @@ export const createCampaign = async (req: AuthenticatedRequest, res: Response) =
         targetTags: JSON.stringify(targetTags || []),
         sessionNames: JSON.stringify(sessionNames || []),
         sessionName: resolvedSessionName, // Para compatibilidade
-        manualPhones: typeof manualPhones === 'string' && manualPhones.trim() ? manualPhones.trim() : null,
+        manualPhones: parsedManualPhones.length > 0 ? parsedManualPhones.join('\n') : null,
         messageType: messageType || 'text',
         messageContent: JSON.stringify(messageContent ?? { text: '' }),
         randomDelay: randomDelay || 30,
@@ -439,7 +441,7 @@ export const updateCampaign = async (req: AuthenticatedRequest, res: Response) =
     if (messageContent !== undefined) updateData.messageContent = JSON.stringify(messageContent);
     if (randomDelay !== undefined) updateData.randomDelay = randomDelay;
     if (manualPhones !== undefined) {
-      updateData.manualPhones = typeof manualPhones === 'string' && manualPhones.trim() ? manualPhones.trim() : null;
+      updateData.manualPhones = typeof manualPhones === 'string' && manualPhones.trim() ? manualPhones.replace(/\\r\\n|\\n|\\r|\r\n|\r/g, '\n').trim() : null;
     }
 
     // Determinar novo status e modo de envio se fornecidos
