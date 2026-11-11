@@ -14,7 +14,10 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
 
   const getUserRoleText = (role: string) => {
     switch (role) {
+      case 'SUPERADMIN':
+        return 'Superadmin';
       case 'ADMIN':
+      case 'TENANT_ADMIN':
         return 'Administrador';
       case 'USER':
         return 'Usuário';

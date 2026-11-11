@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { uazapiService, publicUazapiSession } from '../services/uazapiService';
 import { Router } from 'express';
 import { WahaSyncService } from '../services/wahaSyncService';
@@ -106,17 +107,18 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     const headerTenantId = req.header('X-Tenant-Id');
     console.log('📋 GET /sessions - user:', req.user?.email, 'role:', req.user?.role, 'tenantId:', req.tenantId, 'X-Tenant-Id header:', headerTenantId);
 
-    // Sempre usar o tenantId do token (mesmo para SUPERADMIN quando tem empresa selecionada)
-    const tenantId = req.tenantId;
+    const isSuperAdmin = req.user?.role === 'SUPERADMIN' || req.user?.email === 'diegoizac@gmail.com';
+    // Para Superadmin sem filtro explícito de header, não limitar por tenantId
+    const effectiveTenantId = isSuperAdmin && !headerTenantId ? undefined : req.tenantId;
 
-    if (tenantId) {
+    if (effectiveTenantId) {
       try {
-        await syncUazapiAccountForTenant(tenantId);
+        await syncUazapiAccountForTenant(effectiveTenantId);
       } catch {
         // Ignorar silenciosamente se AdminToken ainda não estiver configurado
       }
     }
-    const uazapiSessions = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI', ...(tenantId ? { tenantId } : {}) } });
+    const uazapiSessions = await prisma.whatsAppSession.findMany({ where: { provider: 'UAZAPI', ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}) } });
     await Promise.all(uazapiSessions.map(async session => {
       if (!session.uazapiToken || !session.uazapiHost) return;
       try {
@@ -135,7 +137,7 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     // Sincronizar apenas sessões WAHA que já existem no banco DESTE tenant
     // NÃO buscar sessões externas - sistema SaaS multi-tenant
     try {
-      const wahaSessions = await WhatsAppSessionService.getAllSessions(tenantId);
+      const wahaSessions = await WhatsAppSessionService.getAllSessions(effectiveTenantId);
       const wahaSessionsFiltered = wahaSessions.filter(s => s.provider === 'WAHA');
 
       if (wahaSessionsFiltered.length > 0) {
@@ -155,7 +157,7 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     // Sincronizar sessões Quepasa
     try {
       console.log('🔄 Sincronizando status das sessões Quepasa...');
-      const quepasaSessions = await WhatsAppSessionService.getAllSessions(tenantId);
+      const quepasaSessions = await WhatsAppSessionService.getAllSessions(effectiveTenantId);
       const quepasaConfig = await settingsService.getQuepasaConfig();
 
       console.log(`📊 Total de sessões: ${quepasaSessions.length}`);
@@ -362,7 +364,7 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     // Sincronizar apenas sessões Evolution que já existem no banco DESTE tenant
     // NÃO buscar sessões externas - sistema SaaS multi-tenant
     try {
-      const allSessions = await WhatsAppSessionService.getAllSessions(tenantId);
+      const allSessions = await WhatsAppSessionService.getAllSessions(effectiveTenantId);
       const evolutionSessions = allSessions.filter(s => s.provider === 'EVOLUTION');
 
       if (evolutionSessions.length > 0) {
@@ -413,8 +415,7 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     }
 
     // Retornar todas as sessões atualizadas do banco (SUPERADMIN enxerga toda a frota de qualquer tenant)
-    const effectiveFilterTenantId = req.user?.role === 'SUPERADMIN' ? undefined : tenantId;
-    const updatedSessions = await WhatsAppSessionService.getAllSessions(effectiveFilterTenantId);
+    const updatedSessions = await WhatsAppSessionService.getAllSessions(effectiveTenantId);
     res.json(updatedSessions);
   } catch (error) {
     console.error('Erro ao listar sessões:', error);
@@ -450,8 +451,10 @@ router.get('/sessions/:sessionName', authMiddleware, async (req: AuthenticatedRe
 });
 
 
-// Helper para sincronizar instâncias UAZAPI da conta usando o Admin Token configurado
+// Helper para sincronizar instâncias UAZAPI da conta usando o Admin Token configurado com blindagem multi-tenant
 async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string, overrideAdminToken?: string) {
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  const tenantSlug = tenant?.slug || tenantId;
   const tenantSettings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
   const globalSettings = await settingsService.getSettings();
   const existingSession = await prisma.whatsAppSession.findFirst({
@@ -481,7 +484,62 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
   const { normalizeUazapiHost, normalizeUazapiStatus, encryptUazapiToken, UazapiClient } = await import('../services/uazapiClient');
   const host = normalizeUazapiHost(rawHost);
 
-  let instances: any[] = [];
+  // Determinar se estamos usando o cluster compartilhado Ruptur
+  const isPlatformGateway = host.includes('ruptur001.uazapi.com') ||
+    adminToken === (globalSettings as any)?.uazapiAdminToken ||
+    adminToken === process.env.UAZAPI_ADMIN_TOKEN;
+
+  const allowedInstanceNames = new Set<string>();
+
+  if (isPlatformGateway) {
+    // Consultar o Ruptur Kernel para autorizar exclusivamente as instâncias deste tenant
+    try {
+      let bridgeToken = '';
+      try {
+        if (fs.existsSync('/run/secrets/ruptur_chatwoot_bridge_token')) {
+          bridgeToken = fs.readFileSync('/run/secrets/ruptur_chatwoot_bridge_token', 'utf8').trim();
+        } else if (process.env.RUPTUR_BRIDGE_TOKEN) {
+          bridgeToken = process.env.RUPTUR_BRIDGE_TOKEN.trim();
+        }
+      } catch {}
+
+      const kernelRes = await fetch('http://aquecedor_control_plane:8787/v1/instances', {
+        headers: {
+          'x-ruptur-bridge-token': bridgeToken,
+          'x-ruptur-actor-role': 'ADMIN',
+          'x-ruptur-actor-id': 'campaign-backend',
+          'x-ruptur-tenant-id': tenantSlug
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (kernelRes.ok) {
+        const kernelInstances = await kernelRes.json();
+        if (Array.isArray(kernelInstances)) {
+          for (const kInst of kernelInstances) {
+            if (kInst.name) allowedInstanceNames.add(String(kInst.name).trim());
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[SyncUazapi] Erro ao consultar kernel para tenant:', tenantSlug, err);
+    }
+
+    // Se o tenant não possui nenhuma instância no Kernel, limpar sessões vazadas deste tenant e sair
+    if (allowedInstanceNames.size === 0) {
+      const leaked = await prisma.whatsAppSession.findMany({
+        where: { provider: 'UAZAPI', tenantId }
+      });
+      if (leaked.length > 0) {
+        console.warn(`[SyncUazapi] Removendo ${leaked.length} sessões órfãs/vazadas do tenant ${tenantSlug}`);
+        await prisma.whatsAppSession.deleteMany({
+          where: { provider: 'UAZAPI', tenantId }
+        });
+      }
+      return { imported: 0, updated: 0, skipped: 0, instances: [] };
+    }
+  }
+
+  let instances = [];
   const response = await fetch(`${host}/instance/all`, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json', admintoken: adminToken },
@@ -503,7 +561,7 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
   }
 
   let imported = 0, updated = 0, skipped = 0;
-  const results: any[] = [];
+  const results = [];
   const tenantPrefix = tenantId.substring(0, 8);
 
   for (const inst of instances) {
@@ -515,8 +573,15 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
       continue;
     }
 
-    const identity = crypto.createHash('sha256').update(`${host}:${instId}`).digest('hex');
     const displayName = instName.replace(/_[0-9a-f]{8}$/, '');
+
+    // BLINDAGEM DE ISOLAMENTO: No gateway compartilhado, somente instâncias pertencentes ao tenant
+    if (isPlatformGateway && !allowedInstanceNames.has(instName) && !allowedInstanceNames.has(displayName)) {
+      skipped++;
+      continue;
+    }
+
+    const identity = crypto.createHash('sha256').update(`${host}:${instId}`).digest('hex');
     const sessionName = instName.includes(`_${tenantPrefix}`) ? instName : `${displayName}_${tenantPrefix}`;
 
     // Procurar sessão existente por uazapiInstanceId ou por name
