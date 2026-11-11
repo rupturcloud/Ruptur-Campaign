@@ -184,16 +184,19 @@ export const megaSso = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Se o slug enviado for 'default', priorizar o tenant 'ruptur' caso exista (tenant principal de produção)
-    let tenant = cleanSlug === 'default'
-      ? (await prisma.tenant.findUnique({ where: { slug: 'ruptur' } })) || (await prisma.tenant.findUnique({ where: { slug: 'default' } }))
-      : await prisma.tenant.findUnique({ where: { slug: cleanSlug } });
+    // Se o identificador enviado for 'default', 'ruptur' ou o UUID do Ruptur Master, unificar no tenant canônico
+    const MASTER_TENANT_ID = '69bc1a56-27c8-4173-9aac-c7aba751b8bb';
+    const isMasterIdentifier = cleanSlug === 'default' || cleanSlug === 'ruptur' || cleanSlug === MASTER_TENANT_ID;
+
+    let tenant = isMasterIdentifier
+      ? (await prisma.tenant.findUnique({ where: { id: MASTER_TENANT_ID } })) || (await prisma.tenant.findUnique({ where: { slug: 'ruptur' } }))
+      : (await prisma.tenant.findUnique({ where: { id: cleanSlug } })) || (await prisma.tenant.findUnique({ where: { slug: cleanSlug } }));
 
     if (!tenant) {
       tenant = await prisma.tenant.create({
         data: {
           slug: cleanSlug,
-          name: cleanSlug === 'default' ? 'Ruptur Oficial' : `Tenant ${cleanSlug}`,
+          name: isMasterIdentifier ? 'Ruptur' : `Tenant ${cleanSlug}`,
           active: true
         }
       });

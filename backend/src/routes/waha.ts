@@ -108,8 +108,9 @@ router.get('/sessions', authMiddleware, async (req: AuthenticatedRequest, res: R
     console.log('📋 GET /sessions - user:', req.user?.email, 'role:', req.user?.role, 'tenantId:', req.tenantId, 'X-Tenant-Id header:', headerTenantId);
 
     const isSuperAdmin = req.user?.role === 'SUPERADMIN' || req.user?.email === 'diegoizac@gmail.com';
-    // Para Superadmin sem filtro explícito de header, não limitar por tenantId
-    const effectiveTenantId = isSuperAdmin && !headerTenantId ? undefined : req.tenantId;
+    const MASTER_TENANT_ID = '69bc1a56-27c8-4173-9aac-c7aba751b8bb';
+    // Para Superadmin sem filtro explícito de header, usar o tenant corporativo mestre
+    const effectiveTenantId = headerTenantId || req.tenantId || (isSuperAdmin ? MASTER_TENANT_ID : undefined);
 
     if (effectiveTenantId) {
       try {
@@ -455,6 +456,9 @@ router.get('/sessions/:sessionName', authMiddleware, async (req: AuthenticatedRe
 async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string, overrideAdminToken?: string) {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   const tenantSlug = tenant?.slug || tenantId;
+  const MASTER_TENANT_ID = '69bc1a56-27c8-4173-9aac-c7aba751b8bb';
+  const isMasterTenant = tenantId === MASTER_TENANT_ID || tenantSlug === 'ruptur' || tenantSlug === 'default';
+
   const tenantSettings = await prisma.tenantSettings.findUnique({ where: { tenantId } });
   const globalSettings = await settingsService.getSettings();
   const existingSession = await prisma.whatsAppSession.findFirst({
@@ -503,12 +507,15 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
         }
       } catch {}
 
+      // Para o tenant mestre Ruptur, a telemetria do control plane opera sob 'default'
+      const kernelTenantHeader = isMasterTenant ? 'default' : tenantSlug;
+
       const kernelRes = await fetch('http://aquecedor_control_plane:8787/v1/instances', {
         headers: {
           'x-ruptur-bridge-token': bridgeToken,
           'x-ruptur-actor-role': 'ADMIN',
           'x-ruptur-actor-id': 'campaign-backend',
-          'x-ruptur-tenant-id': tenantSlug
+          'x-ruptur-tenant-id': kernelTenantHeader
         },
         signal: AbortSignal.timeout(5000)
       });
@@ -524,8 +531,8 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
       console.warn('[SyncUazapi] Erro ao consultar kernel para tenant:', tenantSlug, err);
     }
 
-    // Se o tenant não possui nenhuma instância no Kernel, limpar sessões vazadas deste tenant e sair
-    if (allowedInstanceNames.size === 0) {
+    // Se NÃO for o tenant mestre E não possuir nenhuma instância no Kernel, limpar sessões vazadas deste tenant e sair
+    if (!isMasterTenant && allowedInstanceNames.size === 0) {
       const leaked = await prisma.whatsAppSession.findMany({
         where: { provider: 'UAZAPI', tenantId }
       });
@@ -576,7 +583,8 @@ async function syncUazapiAccountForTenant(tenantId: string, overrideUrl?: string
     const displayName = instName.replace(/_[0-9a-f]{8}$/, '');
 
     // BLINDAGEM DE ISOLAMENTO: No gateway compartilhado, somente instâncias pertencentes ao tenant
-    if (isPlatformGateway && !allowedInstanceNames.has(instName) && !allowedInstanceNames.has(displayName)) {
+    // No tenant mestre (Ruptur / Superadmin), toda a frota operacional é visível e utilizável
+    if (isPlatformGateway && !isMasterTenant && !allowedInstanceNames.has(instName) && !allowedInstanceNames.has(displayName)) {
       skipped++;
       continue;
     }
